@@ -1,0 +1,6 @@
+@ApiClone_HostAddress = http://localhost:5001
+
+GET {{ApiClone_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
