@@ -52,7 +52,9 @@ ArchitectureTests -> Catalog, Orders  (Basket & Identity to be added)
 Created the root directory and opened it in VS Code.
 ```powershell
 mkdir eCommerce-Monolith
+
 cd eCommerce-Monolith
+
 code .
 ```
 
@@ -174,8 +176,16 @@ Create **`Directory.Packages.props`** in the repo root:
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageVersion Include="xunit" Version="2.5.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.3" />
+    
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.2" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.4.0" />
   </ItemGroup>
 </Project>
+
 ```
 
 Or generate it via PowerShell:
@@ -187,6 +197,12 @@ $content = @'
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageVersion Include="xunit" Version="2.5.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.2" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.4.0" />
   </ItemGroup>
 </Project>
 '@
