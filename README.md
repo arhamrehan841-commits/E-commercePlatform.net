@@ -477,6 +477,122 @@ Successfully created/updated stack - eCommerce-Network-Stack
 
 ---
 
+
+### Day 4 — CI/CD Pipeline Scaffolding
+
+**Objective:** Build the automated gatekeeper pipeline today rather than waiting until the end of the project. Every commit will trigger a cloud server that compiles the .NET modular monolith, runs architectural boundary tests, and statically analyzes AWS CloudFormation templates.
+
+**Platform:** GitHub Actions — industry default, deeply integrated, and free.
+
+Two separate pipelines are established:
+- **dotnet-ci** — monitors C# domain logic and architecture boundaries
+- **iac-ci** — monitors AWS infrastructure definitions
+
+---
+
+#### Commit 1: The .NET Continuous Integration Pipeline
+
+This workflow ensures that nobody can merge code that breaks the compilation rules set up on Day 2, or violates the `NetArchTest` boundary rules set up on Day 1.
+
+**Step 1:** Create the GitHub Actions directory structure.
+
+```powershell
+mkdir .github/workflows
+```
+
+**Step 2:** Create **`.github/workflows/dotnet-ci.yml`**:
+
+```yaml
+name: .NET Enterprise CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Restore Dependencies
+      run: dotnet restore
+
+    - name: Build Solution (Strict)
+      # This enforces our Directory.Build.props <TreatWarningsAsErrors> rule
+      run: dotnet build --no-restore
+
+    - name: Execute Architecture & Domain Tests
+      run: dotnet test --no-build --verbosity normal
+```
+
+**Step 3:** Commit the pipeline.
+
+```powershell
+git add .github/workflows/dotnet-ci.yml
+git commit -m "ci: implement automated .net build and architecture test pipeline"
+```
+
+---
+
+#### Commit 2: Infrastructure as Code (IaC) Linting
+
+A broken YAML file can take down the entire cloud network. This pipeline mathematically validates CloudFormation templates before any deployment attempt using `cfn-lint`. It only triggers when files inside `infra/` change, keeping it focused and efficient.
+
+**Step 1:** Create **`.github/workflows/iac-ci.yml`**:
+
+```yaml
+name: Infrastructure CI
+
+on:
+  push:
+    paths:
+      - 'infra/**'
+  pull_request:
+    paths:
+      - 'infra/**'
+
+jobs:
+  validate-cloudformation:
+    name: Lint CloudFormation Templates
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup CloudFormation Linter
+      uses: scottbrenner/cfn-lint-action@v2
+
+    - name: Lint VPC & Network Templates
+      # The -I flag ignores informational warnings, failing only on real errors
+      run: cfn-lint -I infra/*.yaml
+```
+
+**Step 2:** Commit the pipeline.
+
+```powershell
+git add .github/workflows/iac-ci.yml
+git commit -m "ci: integrate cfn-lint for automated cloudformation validation"
+```
+
+
+You now have a multi-pipeline CI setup. One monitors your C# domain logic, and the other monitors your AWS infrastructure definitions.
+
+
+---
+
+
 ## Getting Started
 
 ```powershell
