@@ -11,11 +11,20 @@ public class Order
     private readonly List<OrderItem> _items = new();
     public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
 
+    // Parameterless constructor required by Entity Framework Core
     private Order() { }
 
     public static Order Create(Guid customerId)
     {
-        return new Order { Id = Guid.NewGuid(), CustomerId = customerId };
+        // Guard Clause
+        if (customerId == Guid.Empty)
+            throw new ArgumentException("Customer ID cannot be empty");
+
+        return new Order 
+        { 
+            Id = Guid.NewGuid(), 
+            CustomerId = customerId 
+        };
     }
 
     public void AddItem(Guid productId, string productName, Money unitPrice, int quantity)
@@ -29,7 +38,7 @@ public class Order
         if (!_items.Any()) return Money.Zero();
         
         var totalAmount = _items.Sum(i => i.UnitPrice.Amount * i.Quantity);
-        var currency = _items.First().UnitPrice.Currency; // Assuming all items share the same currency
+        var currency = _items.First().UnitPrice.Currency;
         
         return new Money(totalAmount, currency);
     }
