@@ -15,8 +15,15 @@ public class Product
     // Factory method for creating valid products
     public static Product Create(string name, string description, Money price)
     {
+        // Guard Clauses to protect the domain invariants
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Product name cannot be empty");
+
+        if (string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException("Product description cannot be empty");
+
+        if (price.Amount <= 0)
+            throw new ArgumentException("Product price must be greater than zero");
 
         return new Product
         {
