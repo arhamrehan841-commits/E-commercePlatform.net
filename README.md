@@ -49,7 +49,7 @@ ArchitectureTests -> Catalog, Orders  (Basket & Identity to be added)
 
 ## Dev Log
 
-### Day 1 — Workspace & Solution Setup
+### **Day 1 — Workspace & Solution Setup**
 
 #### Step 1: Workspace Initialization
 
@@ -180,7 +180,7 @@ dotnet add tests/ArchitectureTests/ArchitectureTests.csproj reference src/Module
 
 ---
 
-### Day 2 — Enterprise Repository & GitOps Standardization
+### **Day 2 — Enterprise Repository & GitOps Standardization**
 
 **Objective:** Lock down the repository configuration to prevent configuration drift, enforce strict compilation standards across all bounded contexts, and establish the Trunk-Based Development Git baseline. In a monorepo, centralized control of dependencies and compiler rules is mandatory to guarantee deterministic CI/CD builds.
 
@@ -327,7 +327,7 @@ By executing this sequence, you have guaranteed the following constraints:
 
 ---
 
-### Day 3 — Infrastructure as Code (IaC) Bootstrapping
+### **Day 3 — Infrastructure as Code (IaC) Bootstrapping**
 
 **Objective:** Provision an Amazon Virtual Private Cloud (VPC) using AWS CloudFormation, strictly divided into three tiers to meet enterprise security standards.
 
@@ -478,7 +478,7 @@ Successfully created/updated stack - eCommerce-Network-Stack
 ---
 
 
-### Day 4 — CI/CD Pipeline Scaffolding
+### **Day 4 — CI/CD Pipeline Scaffolding**
 
 **Objective:** Build the automated gatekeeper pipeline today rather than waiting until the end of the project. Every commit will trigger a cloud server that compiles the .NET modular monolith, runs architectural boundary tests, and statically analyzes AWS CloudFormation templates.
 
@@ -592,7 +592,7 @@ You now have a multi-pipeline CI setup. One monitors your C# domain logic, and t
 
 ---
 
-### Day 5 — Stateful Infrastructure: RDS SQL Server & Secrets Management
+### **Day 5 — Stateful Infrastructure: RDS SQL Server & Secrets Management**
 
 **Objective:** Define the Infrastructure as Code to provision the relational database layer (Amazon RDS SQL Server). In a modular monolith, the database represents the highest risk of architectural coupling — if the Orders module can execute a SQL JOIN directly against the Catalog tables, you have failed to build a modular system and instead built a distributed big ball of mud. Schema segregation will be enforced at the code level on Day 6. Today we build the physical AWS vault to house it.
 
@@ -687,7 +687,215 @@ git commit -m "feat(infra): define rds sql server and dynamic secrets manager va
 ```
 ---
 
-## Getting Started
+### **Day 6 — Internal Module Architecture (The Domain Layer)**
+
+**Objective:** Implement Rich Domain Models for the Catalog and Orders modules, ensuring strict encapsulation, data integrity, and zero-trust validation at the core entity level.
+
+---
+
+## 1. Curing Primitive Obsession (Shared Kernel)
+
+Instead of passing loose `decimal` values around the system — which risks adding USD to CAD — we created a Value Object to encapsulate money and currency.
+
+**File: `src/SharedKernel/ValueObjects/Money.cs`**
+
+```csharp
+namespace SharedKernel.ValueObjects;
+
+public record Money(decimal Amount, string Currency)
+{
+    public static Money Zero(string currency = "USD") => new(0, currency);
+
+    public Money Add(Money other)
+    {
+        if (Currency != other.Currency)
+            throw new InvalidOperationException("Cannot add different currencies");
+
+        return new Money(Amount + other.Amount, Currency);
+    }
+}
+```
+
+---
+
+## 2. The Catalog Domain (Strict Encapsulation)
+
+We built the `Product` entity with private setters. Guard clauses were explicitly added to the factory method to ensure a product can never be created with a negative price or an empty description.
+
+**File: `src/Modules/Catalog/Domain/Product.cs`**
+
+```csharp
+using SharedKernel.ValueObjects;
+
+namespace Modules.Catalog.Domain;
+
+public class Product
+{
+    public Guid Id { get; private set; }
+    public string Name { get; private set; } = string.Empty;
+    public string Description { get; private set; } = string.Empty;
+    public Money Price { get; private set; } = Money.Zero();
+
+    // Parameterless constructor required by Entity Framework Core
+    private Product() { }
+
+    // Factory method for creating valid products
+    public static Product Create(string name, string description, Money price)
+    {
+        // Guard Clauses to protect domain invariants
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Product name cannot be empty");
+
+        if (string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException("Product description cannot be empty");
+
+        if (price.Amount <= 0)
+            throw new ArgumentException("Product price must be greater than zero");
+
+        return new Product
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            Description = description,
+            Price = price
+        };
+    }
+
+    public void UpdatePrice(Money newPrice)
+    {
+        if (newPrice.Amount <= 0)
+            throw new ArgumentException("Price must be greater than zero");
+
+        Price = newPrice;
+    }
+}
+```
+
+---
+
+## 3. The Orders Domain (Aggregate Root)
+
+The `Order` acts as the **Aggregate Root**. It controls all modifications to the items beneath it. A guard clause was added to prevent the creation of "ghost orders" attached to empty customer IDs.
+
+**File: `src/Modules/Orders/Domain/Order.cs`**
+
+```csharp
+using SharedKernel.ValueObjects;
+
+namespace Modules.Orders.Domain;
+
+public class Order
+{
+    public Guid Id { get; private set; }
+    public Guid CustomerId { get; private set; }
+    public string Status { get; private set; } = "Pending";
+
+    private readonly List<OrderItem> _items = new();
+    public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
+
+    // Parameterless constructor required by Entity Framework Core
+    private Order() { }
+
+    public static Order Create(Guid customerId)
+    {
+        // Guard Clause
+        if (customerId == Guid.Empty)
+            throw new ArgumentException("Customer ID cannot be empty");
+
+        return new Order
+        {
+            Id = Guid.NewGuid(),
+            CustomerId = customerId
+        };
+    }
+
+    public void AddItem(Guid productId, string productName, Money unitPrice, int quantity)
+    {
+        var item = new OrderItem(Id, productId, productName, unitPrice, quantity);
+        _items.Add(item);
+    }
+
+    public Money CalculateTotal()
+    {
+        if (!_items.Any()) return Money.Zero();
+
+        var totalAmount = _items.Sum(i => i.UnitPrice.Amount * i.Quantity);
+        var currency = _items.First().UnitPrice.Currency;
+
+        return new Money(totalAmount, currency);
+    }
+}
+```
+
+---
+
+## 4. The OrderItem Entity (Intrinsic Validation)
+
+`OrderItem` is a child entity. It does not have a public factory method because it must only be created via the `Order` aggregate. Exhaustive guard clauses enforce physical reality — for example, quantity cannot be zero.
+
+**File: `src/Modules/Orders/Domain/OrderItem.cs`**
+
+```csharp
+using SharedKernel.ValueObjects;
+
+namespace Modules.Orders.Domain;
+
+public class OrderItem
+{
+    public Guid Id { get; private set; }
+    public Guid OrderId { get; private set; }
+    public Guid ProductId { get; private set; }
+    public string ProductName { get; private set; } = string.Empty;
+    public Money UnitPrice { get; private set; } = Money.Zero();
+    public int Quantity { get; private set; }
+
+    // Parameterless constructor required by Entity Framework Core
+    private OrderItem() { }
+
+    internal OrderItem(Guid orderId, Guid productId, string productName, Money unitPrice, int quantity)
+    {
+        // Guard Clauses
+        if (orderId == Guid.Empty)
+            throw new ArgumentException("Order ID cannot be empty");
+
+        if (productId == Guid.Empty)
+            throw new ArgumentException("Product ID cannot be empty");
+
+        if (string.IsNullOrWhiteSpace(productName))
+            throw new ArgumentException("Product name cannot be empty");
+
+        if (unitPrice.Amount < 0)
+            throw new ArgumentException("Unit price cannot be negative");
+
+        if (quantity <= 0)
+            throw new ArgumentException("Quantity must be at least 1");
+
+        Id = Guid.NewGuid();
+        OrderId = orderId;
+        ProductId = productId;
+        ProductName = productName;
+        UnitPrice = unitPrice;
+        Quantity = quantity;
+    }
+}
+```
+
+---
+
+## 5. Day 6 Git History Summary
+
+By the end of the session, the Git log reflected these atomic commits:
+
+```
+feat(domain): introduce money value object to shared kernel to prevent currency mismatch
+feat(catalog): implement rich product domain entity with strict encapsulation
+feat(orders): implement order aggregate root and order items
+fix(catalog): add guard clauses to product factory to enforce price and description invariants
+fix(orders): add guard clauses and EF core constructor to order item entity
+fix(orders): add guard clause to order factory to enforce valid customer id
+```
+---
+## **Getting Started**
 
 ```powershell
 # Clone and enter the repo
