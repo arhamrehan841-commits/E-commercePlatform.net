@@ -592,6 +592,100 @@ You now have a multi-pipeline CI setup. One monitors your C# domain logic, and t
 
 ---
 
+### Day 5 — Stateful Infrastructure: RDS SQL Server & Secrets Management
+
+**Objective:** Define the Infrastructure as Code to provision the relational database layer (Amazon RDS SQL Server). In a modular monolith, the database represents the highest risk of architectural coupling — if the Orders module can execute a SQL JOIN directly against the Catalog tables, you have failed to build a modular system and instead built a distributed big ball of mud. Schema segregation will be enforced at the code level on Day 6. Today we build the physical AWS vault to house it.
+
+> **FinOps Note:** Do **not** run `aws cloudformation deploy` for `database.yaml` today. RDS incurs hourly charges even on `t3.micro`. The definition is safely committed to Git. It will be deployed on Day 24 (Integration Testing), tested, and immediately torn down to keep the AWS bill near $0.00.
+
+---
+
+#### Commit 1: The Zero-Trust Database Infrastructure
+
+We do not type a master password into the AWS Console, and we do not hardcode it into YAML. AWS Secrets Manager dynamically generates a highly complex master password during deployment. Only the .NET API will be granted permission to read this secret.
+
+**Step 1:** Create **`infra/database.yaml`**:
+
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Day 5: Enterprise RDS SQL Server & Secrets Management'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "The VPC ID from our Day 3 Network Stack"
+  IsolatedSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "The Isolated Subnets for the DB Subnet Group"
+
+Resources:
+  # 1. Dynamic Master Password Generation
+  DbMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: eCommerce/Database/MasterCredentials
+      Description: "Dynamically generated RDS Master Password"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: "password"
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
+  # 2. Database Security Group (The Vault Door)
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allow SQL Server access strictly from the API"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Note: In a production stack, SourceSecurityGroupId would be your ECS Fargate SG.
+        # For now, we lock it to the VPC CIDR boundary.
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: eCommerce-RDS-SG
+
+  # 3. DB Subnet Group (Placing it in the Isolated Tier)
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnets isolated from the public internet"
+      SubnetIds: !Ref IsolatedSubnetIds
+
+  # 4. The RDS SQL Server Instance (Express Edition for FinOps)
+  SqlServerInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: sqlserver-ex
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
+      MasterUsername: !Join [ "", [ "{{resolve:secretsmanager:", !Ref DbMasterSecret, ":SecretString:username}}" ] ]
+      MasterUserPassword: !Join [ "", [ "{{resolve:secretsmanager:", !Ref DbMasterSecret, ":SecretString:password}}" ] ]
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: eCommerce-ModularMonolith-DB
+
+Outputs:
+  DatabaseEndpoint:
+    Description: "The connection endpoint for the .NET API"
+    Value: !GetAtt SqlServerInstance.Endpoint.Address
+```
+
+**Step 2:** Commit the infrastructure definition.
+
+```powershell
+git add infra/database.yaml
+git commit -m "feat(infra): define rds sql server and dynamic secrets manager vault"
+```
+---
 
 ## Getting Started
 
