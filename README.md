@@ -895,6 +895,192 @@ fix(orders): add guard clauses and EF core constructor to order item entity
 fix(orders): add guard clause to order factory to enforce valid customer id
 ```
 ---
+
+### **Day 7 — Entity Framework Core & Schema Segregation**
+
+**Objective:** Bridge the gap between the pristine C# domain entities (Day 6) and the physical AWS SQL Server vault (Day 5).
+
+In a Modular Monolith, using one massive `AppDbContext` for the entire platform allows developers to write lazy LINQ queries that join the Orders tables directly to the Catalog tables — destroying module boundaries and turning the architecture into a Big Ball of Mud.
+
+The enterprise solution is **Schema Segregation**: a separate `DbContext` per module, with EF Core physically isolating their tables using SQL Server schemas (e.g., `catalog.Products` and `orders.Orders`).
+
+---
+
+## **Commit 1: Centralized EF Core Dependencies**
+
+EF Core NuGet packages are managed centrally so every module uses the exact same version — consistent with the MSBuild configuration established on Day 2.
+
+**Step 1:** Open **`Directory.Packages.props`** at the repo root and add the EF Core packages:
+
+```xml
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="coverlet.collector" Version="6.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageVersion Include="xunit" Version="2.5.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.2" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.2" />
+  </ItemGroup>
+</Project>
+```
+
+**Step 2:** Open **`src/Modules/Catalog/Modules.Catalog.csproj`** and **`src/Modules/Orders/Modules.Orders.csproj`** and add the reference — without a version number:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+</ItemGroup>
+```
+
+Do this for both the Catalog and Orders `.csproj` files.
+
+**Step 3:** Commit.
+
+```powershell
+git add .
+git commit -m "build: add ef core sql server dependencies centrally"
+```
+
+---
+
+## **Commit 2: The Catalog Database Context**
+
+We create the `CatalogDbContext` and map the `Product` entity. EF Core must also be told how to handle the `Money` Value Object, because SQL Server only understands columns — not C# records.
+
+**Step 1:** Create folder `src/Modules/Catalog/Infrastructure/Data/` and add **`CatalogDbContext.cs`**:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Domain;
+
+namespace Modules.Catalog.Infrastructure.Data;
+
+public class CatalogDbContext : DbContext
+{
+    public DbSet<Product> Products { get; set; }
+
+    public CatalogDbContext(DbContextOptions<CatalogDbContext> options) : base(options) { }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // 1. Enforce Schema Segregation
+        modelBuilder.HasDefaultSchema("catalog");
+
+        // 2. Map the Product Entity
+        modelBuilder.Entity<Product>(builder =>
+        {
+            builder.HasKey(p => p.Id);
+            builder.Property(p => p.Name).IsRequired().HasMaxLength(200);
+            builder.Property(p => p.Description).IsRequired().HasMaxLength(2000);
+
+            // 3. Map the Money Value Object (Owned Entity)
+            builder.OwnsOne(p => p.Price, priceBuilder =>
+            {
+                priceBuilder.Property(m => m.Amount)
+                    .HasColumnName("PriceAmount")
+                    .HasColumnType("decimal(18,2)")
+                    .IsRequired();
+
+                priceBuilder.Property(m => m.Currency)
+                    .HasColumnName("PriceCurrency")
+                    .HasMaxLength(3)
+                    .IsRequired();
+            });
+        });
+    }
+}
+```
+
+**Step 2:** Commit.
+
+```powershell
+git add src/Modules/Catalog/Infrastructure/Data/CatalogDbContext.cs
+git commit -m "feat(catalog): implement DbContext with catalog schema and map product entity"
+```
+
+---
+
+## **Commit 3: The Orders Database Context**
+
+The Orders context is slightly more complex — it has an Aggregate Root (`Order`) and a collection of child entities (`OrderItem`). EF Core must be explicitly told about this strict relationship.
+
+**Step 1:** Create folder `src/Modules/Orders/Infrastructure/Data/` and add **`OrdersDbContext.cs`**:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Modules.Orders.Domain;
+
+namespace Modules.Orders.Infrastructure.Data;
+
+public class OrdersDbContext : DbContext
+{
+    public DbSet<Order> Orders { get; set; }
+    public DbSet<OrderItem> OrderItems { get; set; }
+
+    public OrdersDbContext(DbContextOptions<OrdersDbContext> options) : base(options) { }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // 1. Enforce Schema Segregation
+        modelBuilder.HasDefaultSchema("orders");
+
+        // 2. Map the Order Entity
+        modelBuilder.Entity<Order>(builder =>
+        {
+            builder.HasKey(o => o.Id);
+            builder.Property(o => o.CustomerId).IsRequired();
+            builder.Property(o => o.Status).IsRequired().HasMaxLength(50);
+
+            // Strictly map the internal collection
+            builder.HasMany(o => o.Items)
+                   .WithOne()
+                   .HasForeignKey(i => i.OrderId)
+                   .OnDelete(DeleteBehavior.Cascade); // If order is deleted, delete items
+        });
+
+        // 3. Map the OrderItem Entity
+        modelBuilder.Entity<OrderItem>(builder =>
+        {
+            builder.HasKey(i => i.Id);
+            builder.Property(i => i.ProductId).IsRequired();
+            builder.Property(i => i.ProductName).IsRequired().HasMaxLength(200);
+            builder.Property(i => i.Quantity).IsRequired();
+
+            // Map the Money Value Object for the item price
+            builder.OwnsOne(i => i.UnitPrice, priceBuilder =>
+            {
+                priceBuilder.Property(m => m.Amount)
+                    .HasColumnName("UnitPriceAmount")
+                    .HasColumnType("decimal(18,2)")
+                    .IsRequired();
+
+                priceBuilder.Property(m => m.Currency)
+                    .HasColumnName("UnitPriceCurrency")
+                    .HasMaxLength(3)
+                    .IsRequired();
+            });
+        });
+    }
+}
+```
+
+**Step 2:** Commit.
+
+```powershell
+git add src/Modules/Orders/Infrastructure/Data/OrdersDbContext.cs
+git commit -m "feat(orders): implement DbContext with orders schema and map aggregate relationships"
+```
+
+---
+
+> Run `dotnet build` to ensure the new EF Core packages and `DbContext` classes compile flawlessly. You now have a mathematically secure domain that is perfectly mapped to an isolated, enterprise-grade database schema.
+
 ## **Getting Started**
 
 ```powershell
