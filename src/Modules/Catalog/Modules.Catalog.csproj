@@ -4,6 +4,8 @@
     <ProjectReference Include="..\..\SharedKernel\SharedKernel.csproj" />
 
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+
+    <PackageReference Include="MediatR" />
   </ItemGroup>
 
 </Project>

@@ -14,5 +14,7 @@
 
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.2" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.2" />
+
+    <PackageVersion Include="MediatR" Version="12.2.0" />
   </ItemGroup>
 </Project>
