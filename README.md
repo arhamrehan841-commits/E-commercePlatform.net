@@ -1076,6 +1076,167 @@ public class OrdersDbContext : DbContext
 git add src/Modules/Orders/Infrastructure/Data/OrdersDbContext.cs
 git commit -m "feat(orders): implement DbContext with orders schema and map aggregate relationships"
 ```
+---
+
+### **Day 8 — The Application Layer (CQRS & MediatR)**
+
+**Objective:** Decouple the core domain and database from the API edge by implementing the Command Query Responsibility Segregation (CQRS) pattern. Use MediatR as an internal message bus to automatically route requests to their isolated handlers.
+
+---
+
+## **Commit 1: Centralizing the MediatR Dependency**
+
+Enforced the MediatR version globally to ensure all modules in the monolith are strictly synchronized.
+
+**File: `Directory.Packages.props` (Root)**
+
+```xml
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="MediatR" Version="12.2.0" />
+  </ItemGroup>
+</Project>
+```
+
+**File: `src/Modules/Catalog/Modules.Catalog.csproj` & `src/Modules/Orders/Modules.Orders.csproj`**
+
+```xml
+<ItemGroup>
+  <PackageReference Include="MediatR" />
+</ItemGroup>
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "build: add mediatR dependency centrally for cqrs implementation"
+```
+
+---
+
+## **Commit 2: Implementing a Command (Write Operation)**
+
+Commands mutate state. This use case takes a payload, reconstructs the `Money` Value Object, invokes the `Product` Domain Entity (triggering the guard clauses), and commits it to the SQL database.
+
+**File: `src/Modules/Catalog/Application/Products/Create/CreateProductCommand.cs`**
+
+```csharp
+using MediatR;
+
+namespace Modules.Catalog.Application.Products.Create;
+
+// The Request (Data payload)
+public record CreateProductCommand(string Name, string Description, decimal PriceAmount, string Currency) : IRequest<Guid>;
+```
+
+**File: `src/Modules/Catalog/Application/Products/Create/CreateProductCommandHandler.cs`**
+
+```csharp
+using MediatR;
+using Modules.Catalog.Domain;
+using Modules.Catalog.Infrastructure.Data;
+using SharedKernel.ValueObjects;
+
+namespace Modules.Catalog.Application.Products.Create;
+
+internal sealed class CreateProductCommandHandler : IRequestHandler<CreateProductCommand, Guid>
+{
+    private readonly CatalogDbContext _dbContext;
+
+    public CreateProductCommandHandler(CatalogDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<Guid> Handle(CreateProductCommand request, CancellationToken cancellationToken)
+    {
+        var price = new Money(request.PriceAmount, request.Currency);
+        var product = Product.Create(request.Name, request.Description, price);
+
+        _dbContext.Products.Add(product);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return product.Id;
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add src/Modules/Catalog/Application/Products/Create/
+git commit -m "feat(catalog): implement create product command and handler using mediatR"
+```
+
+---
+
+## **Commit 3. Implementing a Query (Read Operation)**
+
+Queries never change data. This use case retrieves a product by its ID. It explicitly declares a nullable return type (`?`) to guarantee type-safety if the ID is not found, and uses EF Core's `AsNoTracking()` for optimal read performance.
+
+**File: `src/Modules/Catalog/Application/Products/GetById/GetProductByIdQuery.cs`**
+
+```csharp
+using MediatR;
+
+namespace Modules.Catalog.Application.Products.GetById;
+
+// The ? explicitly enforces that the API must handle a potential 'Not Found' (null) response.
+public record GetProductByIdQuery(Guid ProductId) : IRequest<ProductResponse?>;
+
+public record ProductResponse(Guid Id, string Name, string Description, decimal PriceAmount, string Currency);
+```
+
+**File: `src/Modules/Catalog/Application/Products/GetById/GetProductByIdQueryHandler.cs`**
+
+```csharp
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Infrastructure.Data;
+
+namespace Modules.Catalog.Application.Products.GetById;
+
+internal sealed class GetProductByIdQueryHandler : IRequestHandler<GetProductByIdQuery, ProductResponse?>
+{
+    private readonly CatalogDbContext _dbContext;
+
+    public GetProductByIdQueryHandler(CatalogDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<ProductResponse?> Handle(GetProductByIdQuery request, CancellationToken cancellationToken)
+    {
+        // AsNoTracking bypasses EF Core's change tracker for high-speed reads
+        var product = await _dbContext.Products
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == request.ProductId, cancellationToken);
+
+        if (product is null)
+        {
+            return null;
+        }
+
+        return new ProductResponse(
+            product.Id,
+            product.Name,
+            product.Description,
+            product.Price.Amount,
+            product.Price.Currency);
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add src/Modules/Catalog/Application/Products/GetById/
+git commit -m "feat(catalog): implement get product by id query with strict nullable"
+```
 
 ---
 
