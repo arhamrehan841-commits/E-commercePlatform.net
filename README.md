@@ -49,7 +49,7 @@ ArchitectureTests -> Catalog, Orders  (Basket & Identity to be added)
 
 ## Dev Log
 
-### **Day 1 — Workspace & Solution Setup**
+## **Day 1 — Workspace & Solution Setup**
 
 #### Step 1: Workspace Initialization
 
@@ -180,7 +180,7 @@ dotnet add tests/ArchitectureTests/ArchitectureTests.csproj reference src/Module
 
 ---
 
-### **Day 2 — Enterprise Repository & GitOps Standardization**
+## **Day 2 — Enterprise Repository & GitOps Standardization**
 
 **Objective:** Lock down the repository configuration to prevent configuration drift, enforce strict compilation standards across all bounded contexts, and establish the Trunk-Based Development Git baseline. In a monorepo, centralized control of dependencies and compiler rules is mandatory to guarantee deterministic CI/CD builds.
 
@@ -327,7 +327,7 @@ By executing this sequence, you have guaranteed the following constraints:
 
 ---
 
-### **Day 3 — Infrastructure as Code (IaC) Bootstrapping**
+## **Day 3 — Infrastructure as Code (IaC) Bootstrapping**
 
 **Objective:** Provision an Amazon Virtual Private Cloud (VPC) using AWS CloudFormation, strictly divided into three tiers to meet enterprise security standards.
 
@@ -478,7 +478,7 @@ Successfully created/updated stack - eCommerce-Network-Stack
 ---
 
 
-### **Day 4 — CI/CD Pipeline Scaffolding**
+## **Day 4 — CI/CD Pipeline Scaffolding**
 
 **Objective:** Build the automated gatekeeper pipeline today rather than waiting until the end of the project. Every commit will trigger a cloud server that compiles the .NET modular monolith, runs architectural boundary tests, and statically analyzes AWS CloudFormation templates.
 
@@ -592,7 +592,7 @@ You now have a multi-pipeline CI setup. One monitors your C# domain logic, and t
 
 ---
 
-### **Day 5 — Stateful Infrastructure: RDS SQL Server & Secrets Management**
+## **Day 5 — Stateful Infrastructure: RDS SQL Server & Secrets Management**
 
 **Objective:** Define the Infrastructure as Code to provision the relational database layer (Amazon RDS SQL Server). In a modular monolith, the database represents the highest risk of architectural coupling — if the Orders module can execute a SQL JOIN directly against the Catalog tables, you have failed to build a modular system and instead built a distributed big ball of mud. Schema segregation will be enforced at the code level on Day 6. Today we build the physical AWS vault to house it.
 
@@ -687,7 +687,7 @@ git commit -m "feat(infra): define rds sql server and dynamic secrets manager va
 ```
 ---
 
-### **Day 6 — Internal Module Architecture (The Domain Layer)**
+## **Day 6 — Internal Module Architecture (The Domain Layer)**
 
 **Objective:** Implement Rich Domain Models for the Catalog and Orders modules, ensuring strict encapsulation, data integrity, and zero-trust validation at the core entity level.
 
@@ -896,7 +896,7 @@ fix(orders): add guard clause to order factory to enforce valid customer id
 ```
 ---
 
-### **Day 7 — Entity Framework Core & Schema Segregation**
+## **Day 7 — Entity Framework Core & Schema Segregation**
 
 **Objective:** Bridge the gap between the pristine C# domain entities (Day 6) and the physical AWS SQL Server vault (Day 5).
 
@@ -1078,7 +1078,7 @@ git commit -m "feat(orders): implement DbContext with orders schema and map aggr
 ```
 ---
 
-### **Day 8 — The Application Layer (CQRS & MediatR)**
+## **Day 8 — The Application Layer (CQRS & MediatR)**
 
 **Objective:** Decouple the core domain and database from the API edge by implementing the Command Query Responsibility Segregation (CQRS) pattern. Use MediatR as an internal message bus to automatically route requests to their isolated handlers.
 
@@ -1240,7 +1240,201 @@ git commit -m "feat(catalog): implement get product by id query with strict null
 
 ---
 
-> Run `dotnet build` to ensure the new EF Core packages and `DbContext` classes compile flawlessly. You now have a mathematically secure domain that is perfectly mapped to an isolated, enterprise-grade database schema.
+## **Day 9 — The API Edge & Global Exception Handling**
+
+**Objective:** Expose the Modular Monolith to the outside world. Use .NET 8's `IExceptionHandler` to catch domain errors globally and convert them into secure, standardized RFC 7807 Problem Details (JSON). Wire up the API Controller to route incoming HTTP requests directly into MediatR.
+
+Without this, if a user sends a negative price, the `ArgumentException` thrown by the Domain Entity (Day 6) would crash the request and return an unformatted stack trace to the user — a massive security vulnerability in an enterprise environment.
+
+---
+
+## **Commit 1: The Global Exception Handler**
+
+Placed in the `Host` project, which acts as the outer web shell that loads all modules.
+
+**Step 1:** Create folder `src/Host/Middleware/` and add **`GlobalExceptionHandler.cs`**:
+
+```csharp
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Host.Middleware;
+
+// This class intercepts ANY unhandled exception thrown anywhere in the application
+internal sealed class GlobalExceptionHandler : IExceptionHandler
+{
+    private readonly ILogger<GlobalExceptionHandler> _logger;
+
+    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
+    {
+        _logger = logger;
+    }
+
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext httpContext,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        // 1. Securely log the full error and stack trace for internal debugging
+        _logger.LogError(exception, "An exception occurred: {Message}", exception.Message);
+
+        // 2. Map the Exception type to a specific HTTP Status Code
+        var statusCode = exception switch
+        {
+            // If the Domain throws a Guard Clause exception, it's a Bad Request (400)
+            ArgumentException => StatusCodes.Status400BadRequest,
+
+            // Otherwise, it's an unhandled Internal Server Error (500)
+            _ => StatusCodes.Status500InternalServerError
+        };
+
+        // 3. Construct the RFC 7807 standard JSON response
+        var problemDetails = new ProblemDetails
+        {
+            Status = statusCode,
+            Title = statusCode == 400 ? "Validation Error" : "Server Error",
+            Detail = statusCode == 400 ? exception.Message : "An unexpected error occurred.",
+            Type = $"https://httpstatuses.com/{statusCode}"
+        };
+
+        // 4. Return the secure response to the client
+        httpContext.Response.StatusCode = statusCode;
+        await httpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
+
+        // Return true to tell ASP.NET that we handled the exception and to stop processing
+        return true;
+    }
+}
+```
+
+**Step 2:** Commit.
+
+```powershell
+git add src/Host/Middleware/GlobalExceptionHandler.cs
+git commit -m "feat(host): implement IExceptionHandler to convert domain exceptions to RFC 7807 problem details"
+```
+
+---
+
+## **Commit 2: Wiring up the Host (`Program.cs`)**
+
+Tell the `Host` project to activate the Exception Handler and officially register MediatR so it can build its internal handler dictionary.
+
+**Step 1:** Open **`src/Host/Program.cs`** and update it:
+
+```csharp
+using Host.Middleware;
+using Modules.Catalog.Application.Products.Create;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// --- 1. REGISTER SERVICES (Dependency Injection) ---
+
+builder.Services.AddControllers();
+
+// Register the Global Exception Handler infrastructure
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+// Register MediatR (This single line scans the Catalog assembly and finds all handlers)
+builder.Services.AddMediatR(config =>
+{
+    config.RegisterServicesFromAssembly(typeof(CreateProductCommand).Assembly);
+    // Note: We will add the Orders assembly here later!
+});
+
+var app = builder.Build();
+
+// --- 2. CONFIGURE THE HTTP PIPELINE ---
+
+// Activate the Exception Handler middleware first, so it wraps all incoming requests
+app.UseExceptionHandler();
+
+app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
+```
+
+**Step 2:** Commit.
+
+```powershell
+git add src/Host/Program.cs
+git commit -m "chore(host): register global exception handler and MediatR in DI container"
+```
+
+---
+
+## **Commit 3: The API Controller (The Entry Point)**
+
+The controller is intentionally lean. Because MediatR handles the flow and the Domain handles the rules, the Controller only does two things: takes the HTTP request and passes it to the `ISender`.
+
+**Step 1:** Create folder `src/Host/Controllers/` and add **`ProductsController.cs`**:
+
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Modules.Catalog.Application.Products.Create;
+using Modules.Catalog.Application.Products.GetById;
+
+namespace Host.Controllers;
+
+[ApiController]
+[Route("api/catalog/products")]
+public class ProductsController : ControllerBase
+{
+    private readonly ISender _sender;
+
+    public ProductsController(ISender sender)
+    {
+        _sender = sender;
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> CreateProduct(
+        [FromBody] CreateProductCommand command,
+        CancellationToken cancellationToken)
+    {
+        // 1. Send the command to MediatR
+        var productId = await _sender.Send(command, cancellationToken);
+
+        // 2. Return a 201 Created with the location of the new resource
+        return CreatedAtAction(nameof(GetProduct), new { id = productId }, new { id = productId });
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetProduct(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken)
+    {
+        var query = new GetProductByIdQuery(id);
+        var result = await _sender.Send(query, cancellationToken);
+
+        // Handle the nullable response contract we explicitly defined on Day 8
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+}
+```
+
+**Step 2:** Commit.
+
+```powershell
+git add src/Host/Controllers/ProductsController.cs
+git commit -m "feat(host): implement products API controller orchestrating MediatR commands and queries"
+```
+
+---
+
+> Run `dotnet build` from the root directory. The full vertical slice for the Catalog module is now complete:
+> **API Controller** → **MediatR** → **Domain (business rules)** → **EF Core (isolated schema)**
+> If anything fails, the Global Exception Handler safely catches it and returns a clean `400 Bad Request`.
+
 
 ## **Getting Started**
 
