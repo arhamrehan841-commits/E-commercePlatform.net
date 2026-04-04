@@ -1386,38 +1386,27 @@ public class ProductsController : ControllerBase
 {
     private readonly ISender _sender;
 
-    public ProductsController(ISender sender)
-    {
-        _sender = sender;
-    }
+    public ProductsController(ISender sender) => _sender = sender;
 
     [HttpPost]
-    public async Task<IActionResult> CreateProduct(
-        [FromBody] CreateProductCommand command,
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateProduct([FromBody] CreateProductCommand command, CancellationToken ct)
     {
-        // 1. Send the command to MediatR
-        var productId = await _sender.Send(command, cancellationToken);
+        // 1. Write Side: Mutate state and get the new ID
+        var productId = await _sender.Send(command, ct);
 
-        // 2. Return a 201 Created with the location of the new resource
-        return CreatedAtAction(nameof(GetProduct), new { id = productId }, new { id = productId });
+        // 2. Read Side: Re-use the existing Query logic to fetch the full DTO
+        // This ensures the response matches our single source of truth for 'ProductResponse'
+        var response = await _sender.Send(new GetProductByIdQuery(productId), ct);
+
+        // 3. REST Contract: 201 Created + Location Header + Full Body
+        return CreatedAtAction(nameof(GetProduct), new { id = productId }, response);
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<IActionResult> GetProduct(
-        [FromRoute] Guid id,
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> GetProduct([FromRoute] Guid id, CancellationToken ct)
     {
-        var query = new GetProductByIdQuery(id);
-        var result = await _sender.Send(query, cancellationToken);
-
-        // Handle the nullable response contract we explicitly defined on Day 8
-        if (result is null)
-        {
-            return NotFound();
-        }
-
-        return Ok(result);
+        var result = await _sender.Send(new GetProductByIdQuery(id), ct);
+        return result is null ? NotFound() : Ok(result);
     }
 }
 ```
@@ -1426,7 +1415,7 @@ public class ProductsController : ControllerBase
 
 ```powershell
 git add src/Host/Controllers/ProductsController.cs
-git commit -m "feat(host): implement products API controller orchestrating MediatR commands and queries"
+git commit -m "feat(host): implement products API controller orchestrating MediatR commands and queries and implement orchestrated post-command query dispatch in controller"
 ```
 
 ---
