@@ -1,32 +1,38 @@
+using Host.Extensions;
 using Host.Middleware;
+using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Application.Products.Create;
+using Modules.Catalog.Infrastructure.Data;
+using Modules.Orders.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- 1. REGISTER SERVICES (Dependency Injection) ---
-
+// 1. Core Services
 builder.Services.AddControllers();
-
-// Register the Global Exception Handler infrastructure
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-// Register MediatR (This single line scans the Catalog assembly and finds all handlers)
+// 2. Database Registration
+var connectionString = builder.Configuration.GetConnectionString("Database");
+builder.Services.AddDbContext<CatalogDbContext>(opt => opt.UseSqlServer(connectionString));
+builder.Services.AddDbContext<OrdersDbContext>(opt => opt.UseSqlServer(connectionString));
+
+// 3. MediatR Orchestration
 builder.Services.AddMediatR(config => 
 {
     config.RegisterServicesFromAssembly(typeof(CreateProductCommand).Assembly);
-    // Note: We will add the Orders assembly here later!
 });
 
 var app = builder.Build();
 
-// --- 2. CONFIGURE THE HTTP PIPELINE ---
+// 4. Pipeline Configuration
+if (app.Environment.IsDevelopment())
+{
+    app.ApplyMigrations(); // <--- This triggers the Day 10 magic
+}
 
-// Activate the Exception Handler middleware first, so it wraps all incoming requests
 app.UseExceptionHandler(); 
-
 app.UseHttpsRedirection();
-app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
