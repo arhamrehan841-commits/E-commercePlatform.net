@@ -1418,6 +1418,187 @@ git add src/Host/Controllers/ProductsController.cs
 git commit -m "feat(host): implement products API controller orchestrating MediatR commands and queries and implement orchestrated post-command query dispatch in controller"
 ```
 
+## **Day 10 — The Self-Healing Database & Schema Segregation**
+
+**Objective:** Connect the application to a real SQL Server Express instance, implement Design-Time Factories to fix the MediatR/EF tooling conflict, generate physical migration files for both module schemas, and wire up an auto-migrator so the database self-configures on every startup.
+
+---
+
+## **Commit 1: SQL Server Express, Design-Time Factories & Migrations**
+
+### **Step 1: The Connection String**
+
+Moved from `(localdb)` to a full SQL Server Express instance.
+
+**File: `src/Host/appsettings.Development.json`**
+
+```json
+{
+  "ConnectionStrings": {
+    "Database": "Server=.\\SQLEXPRESS;Database=EcommerceDb;Trusted_Connection=True;TrustServerCertificate=True;"
+  }
+}
+```
+
+### **Step 2: The Design-Time Factories (The "MediatR Fix")**
+
+Because MediatR validates handlers at startup, `dotnet ef` commands crash. These factories provide a "backdoor" for the EF tools to see the DB config without booting the whole app.
+
+**File: `src/Modules/Catalog/Infrastructure/Data/CatalogDbContextFactory.cs`**
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Design;
+
+namespace Modules.Catalog.Infrastructure.Data;
+
+public class CatalogDbContextFactory : IDesignTimeDbContextFactory<CatalogDbContext>
+{
+    public CatalogDbContext CreateDbContext(string[] args)
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<CatalogDbContext>();
+        optionsBuilder.UseSqlServer("Server=.\\SQLEXPRESS;Database=EcommerceDb;Trusted_Connection=True;TrustServerCertificate=True;");
+        return new CatalogDbContext(optionsBuilder.Options);
+    }
+}
+```
+
+**File: `src/Modules/Orders/Infrastructure/Data/OrdersDbContextFactory.cs`**
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Design;
+
+namespace Modules.Orders.Infrastructure.Data;
+
+public class OrdersDbContextFactory : IDesignTimeDbContextFactory<OrdersDbContext>
+{
+    public OrdersDbContext CreateDbContext(string[] args)
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<OrdersDbContext>();
+        optionsBuilder.UseSqlServer("Server=.\\SQLEXPRESS;Database=EcommerceDb;Trusted_Connection=True;TrustServerCertificate=True;");
+        return new OrdersDbContext(optionsBuilder.Options);
+    }
+}
+```
+
+### **Step 3: Generate the Migration Files**
+
+Run these exact commands from the root folder of the project:
+
+```powershell
+# Generate Catalog Migration
+dotnet ef migrations add InitialCatalog -p src/Modules/Catalog -s src/Host --context CatalogDbContext -o Infrastructure/Data/Migrations
+
+# Generate Orders Migration
+dotnet ef migrations add InitialOrders -p src/Modules/Orders -s src/Host --context OrdersDbContext -o Infrastructure/Data/Migrations
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "feat(infra): switch to SQL Server Express and add design-time context factories with initial migrations"
+```
+
+---
+
+## **Commit 2: Auto-Migration on Startup & DbContext Registration**
+
+### **Step 4: The Auto-Migration Extension**
+
+We taught the application how to "heal" itself by pushing pending schema updates to SQL Server every time it starts.
+
+**File: `src/Host/Extensions/MigrationExtensions.cs`**
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Infrastructure.Data;
+using Modules.Orders.Infrastructure.Data;
+
+namespace Host.Extensions;
+
+public static class MigrationExtensions
+{
+    public static void ApplyMigrations(this IApplicationBuilder app)
+    {
+        using IServiceScope scope = app.ApplicationServices.CreateScope();
+
+        var catalogContext = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var ordersContext = scope.ServiceProvider.GetRequiredService<OrdersDbContext>();
+
+        // Applies pending .cs migrations to the physical database
+        catalogContext.Database.Migrate();
+        ordersContext.Database.Migrate();
+    }
+}
+```
+
+### **Step 5: The Final `Program.cs` Wiring**
+
+Connected the `DbContext`s, MediatR, and the new Auto-Migrator in the main entry point.
+
+**File: `src/Host/Program.cs`**
+
+```csharp
+using Host.Extensions;
+using Host.Middleware;
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Application.Products.Create;
+using Modules.Catalog.Infrastructure.Data;
+using Modules.Orders.Infrastructure.Data;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Core Services
+builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+// 2. Database Registration
+var connectionString = builder.Configuration.GetConnectionString("Database");
+builder.Services.AddDbContext<CatalogDbContext>(opt => opt.UseSqlServer(connectionString));
+builder.Services.AddDbContext<OrdersDbContext>(opt => opt.UseSqlServer(connectionString));
+
+// 3. MediatR Orchestration
+builder.Services.AddMediatR(config =>
+{
+    config.RegisterServicesFromAssembly(typeof(CreateProductCommand).Assembly);
+});
+
+var app = builder.Build();
+
+// 4. Pipeline Configuration
+if (app.Environment.IsDevelopment())
+{
+    app.ApplyMigrations(); // <--- This triggers the Day 10 magic
+}
+
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+app.MapControllers();
+
+app.Run();
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "feat(host): wire auto-migration on startup and register catalog and orders db contexts in program"
+```
+
+---
+
+## **Day 10 Final Summary**
+
+| Area | What Was Done |
+|---|---|
+| **Infrastructure** | Switched to SQL Server Express for real persistence |
+| **Decoupling** | Schema Segregation enforced (`catalog` vs `orders` schemas) |
+| **Automation** | Application self-configures on startup via `ApplyMigrations` |
+| **Tooling** | Verified physical table existence in SSMS using the Trust Server Certificate bypass |
+
 ---
 
 > Run `dotnet build` from the root directory. The full vertical slice for the Catalog module is now complete:
