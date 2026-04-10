@@ -1,6 +1,7 @@
 using Bogus;
 using Microsoft.EntityFrameworkCore;
-using Modules.Catalog.Domain; 
+using Modules.Catalog.Domain.Products;
+using SharedKernel.ValueObjects;
 
 namespace Modules.Catalog.Infrastructure.Data;
 
@@ -8,21 +9,23 @@ public static class CatalogDataSeeder
 {
     public static async Task SeedAsync(CatalogDbContext context)
     {
-        // Safety check: Only seed if the database is completely empty
-        if (await context.Products.AnyAsync())
-        {
-            return; 
-        }
+        if (await context.Products.AnyAsync()) return;
 
-        // Configure realistic fake data generation
-        var faker = new Faker<Product>()
-            .RuleFor(p => p.Id, f => Guid.NewGuid())
-            .RuleFor(p => p.Name, f => f.Commerce.ProductName())
-            .RuleFor(p => p.Description, f => f.Commerce.ProductDescription())
-            .RuleFor(p => p.Price.Amount, f => f.Random.Decimal(10m, 500m))
-            .RuleFor(p => p.Price.Currency, f => "USD");
+        var moneyFaker = new Faker<Money>()
+            .CustomInstantiator(f => new Money(
+                f.Random.Decimal(10m, 1000m), 
+                "USD"));
 
-        var products = faker.Generate(50);
+        var productFaker = new Faker<Product>()
+            // This is the fix: Tell Bogus HOW to build a Product
+            .CustomInstantiator(f => Product.Create(
+                f.Commerce.ProductName(),
+                f.Commerce.ProductDescription(),
+                moneyFaker.Generate() // Generate the Money object first
+            ));
+            // You can remove the .RuleFor lines now because the constructor handles it all!
+
+        var products = productFaker.Generate(50);
 
         await context.Products.AddRangeAsync(products);
         await context.SaveChangesAsync();

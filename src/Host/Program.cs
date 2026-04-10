@@ -28,7 +28,7 @@ var app = builder.Build();
 // 4. Pipeline Configuration
 if (app.Environment.IsDevelopment())
 {
-    app.ApplyMigrations(); // <--- This triggers the Day 10 magic
+    await app.ApplyMigrationsAsync(); // <--- This triggers the Day 10 magic
 }
 
 app.UseExceptionHandler(); 

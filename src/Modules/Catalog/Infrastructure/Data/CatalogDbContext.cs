@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using Modules.Catalog.Domain;
+using Modules.Catalog.Domain.Products;
 
 namespace Modules.Catalog.Infrastructure.Data;
 

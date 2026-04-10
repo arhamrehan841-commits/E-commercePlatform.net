@@ -1,5 +1,5 @@
 using MediatR;
-using Modules.Catalog.Domain;
+using Modules.Catalog.Domain.Products;
 using Modules.Catalog.Infrastructure.Data;
 using SharedKernel.ValueObjects;
 

@@ -1,6 +1,6 @@
 using SharedKernel.ValueObjects;
 
-namespace Modules.Catalog.Domain;
+namespace Modules.Catalog.Domain.Products;
 
 public class Product
 {
