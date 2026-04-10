@@ -1601,6 +1601,170 @@ git commit -m "feat(host): wire auto-migration on startup and register catalog a
 
 ---
 
+## **Day 11 — Automated Data Seeding & DDD Integration**
+
+**Objective:** Populate the `EcommerceDb` with 50 realistic products using the Bogus library, handle Domain-Driven Design (DDD) encapsulation (Value Objects and Factory Methods), and upgrade the startup pipeline to handle asynchronous database operations.
+
+---
+
+## **Commit 1: Bogus Implementation & DDD Seeding Logic**
+
+### **Step 1: Install the Seeding Tool**
+
+Added the Bogus library to the Catalog module to handle high-fidelity data generation.
+
+```powershell
+dotnet add src/Modules/Catalog/Modules.Catalog.csproj package Bogus
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "chore(catalog): install Bogus package for data seeding"
+```
+
+## **Commit 2: Implementing Bogus data seeder for products**
+
+### **Step 1: The Catalog Data Seeder**
+
+Implemented the seeder logic. This required using `.CustomInstantiator` to bypass private constructors and correctly handle the `Money` Value Object.
+
+**File: `src/Modules/Catalog/Infrastructure/Data/CatalogDataSeeder.cs`**
+
+```csharp
+using Bogus;
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Domain.Products;
+
+namespace Modules.Catalog.Infrastructure.Data;
+
+public static class CatalogDataSeeder
+{
+    public static async Task SeedAsync(CatalogDbContext context)
+    {
+        // 1. Safety Check: Only seed if the table is empty
+        if (await context.Products.AnyAsync()) return;
+
+        // 2. Define Value Object Generation (Money)
+        var moneyFaker = new Faker<Money>()
+            .CustomInstantiator(f => new Money(
+                f.Random.Decimal(10m, 1000m),
+                "USD"));
+
+        // 3. Define Entity Generation via Factory Method
+        var productFaker = new Faker<Product>()
+            .CustomInstantiator(f => Product.Create(
+                f.Commerce.ProductName(),
+                f.Commerce.ProductDescription(),
+                moneyFaker.Generate()
+            ));
+
+        var products = productFaker.Generate(50);
+
+        await context.Products.AddRangeAsync(products);
+        await context.SaveChangesAsync();
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "feat(catalog): implement Bogus data seeder for products"
+```
+
+---
+
+## **Commit 3: Making migrations async & Startup Wiring**
+
+### **Step 1: The Async Migration Extension**
+
+Upgraded the auto-migrator to be asynchronous to support `MigrateAsync` and the new `SeedAsync` database I/O.
+
+**File: `src/Host/Extensions/MigrationExtensions.cs`**
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Infrastructure.Data;
+using Modules.Orders.Infrastructure.Data;
+
+namespace Host.Extensions;
+
+public static class MigrationExtensions
+{
+    public static async Task ApplyMigrationsAsync(this IApplicationBuilder app)
+    {
+        using IServiceScope scope = app.ApplicationServices.CreateScope();
+
+        var catalogContext = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+        var ordersContext = scope.ServiceProvider.GetRequiredService<OrdersDbContext>();
+
+        // Apply schema updates
+        await catalogContext.Database.MigrateAsync();
+        await ordersContext.Database.MigrateAsync();
+
+        // Populate with initial data
+        await CatalogDataSeeder.SeedAsync(catalogContext);
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "refactor(host): make migrations async and wire up catalog seeder"
+```
+
+## **Commit 4: Fixing the namespace of Product.cs from Modules.Catalog.Domain to Modules.Catalog.Domain.Products**
+
+### **Step 1: Final `Program.cs` Async Update**
+
+Modified the entry point to `await` the migration and seeding process before starting the web server.
+
+**File: `src/Host/Program.cs`**
+
+```csharp
+// ... (Service registrations)
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    // Await the async migration and seeding chain
+    await app.ApplyMigrationsAsync();
+}
+
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+app.MapControllers();
+
+app.Run();
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "fix(host): await async database migrations and seeding on startup and fixed the namespace of Product.cs from Modules.Catalog.Domain to Modules.Catalog.Domain.Products
+"
+```
+
+---
+
+## **Day 11 Final Summary**
+
+| Area | What Was Done |
+|---|---|
+| **Data Generation** | Integrated Bogus for 50 realistic product entries |
+| **DDD Compliance** | Bypassed private constructors using `.CustomInstantiator` |
+| **Pipeline** | Refactored auto-migrator to `async Task` for better DB handling |
+| **Verification** | Confirmed 50 rows in `catalog.Products` via SSMS |
+
+---
+
 > Run `dotnet build` from the root directory. The full vertical slice for the Catalog module is now complete:
 > **API Controller** → **MediatR** → **Domain (business rules)** → **EF Core (isolated schema)**
 > If anything fails, the Global Exception Handler safely catches it and returns a clean `400 Bad Request`.
