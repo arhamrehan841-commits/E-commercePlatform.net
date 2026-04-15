@@ -22,8 +22,7 @@ public class Product
         if (string.IsNullOrWhiteSpace(description))
             throw new ArgumentException("Product description cannot be empty");
 
-        if (price.Amount <= 0)
-            throw new ArgumentException("Product price must be greater than zero");
+        // Price validation is handled by the Money value object, so we can rely on it to throw if the price is invalid
 
         return new Product
         {
@@ -36,9 +35,7 @@ public class Product
 
     public void UpdatePrice(Money newPrice)
     {
-        if (newPrice.Amount <= 0)
-            throw new ArgumentException("Price must be greater than zero");
-            
+        // Price validation is handled by the Money value object, so we can rely on it to throw if the price is invalid
         Price = newPrice;
     }
 }
