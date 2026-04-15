@@ -1,7 +1,8 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Modules.Catalog.Application.Products.Create;
-using Modules.Catalog.Application.Products.GetById;
+using Modules.Catalog.Application.Products.Get.GetById;
+using Modules.Catalog.Application.Products.Get.GetProducts;
 
 namespace Host.Controllers;
 
@@ -32,5 +33,25 @@ public class ProductsController : ControllerBase
     {
         var result = await _sender.Send(new GetProductByIdQuery(id), ct);
         return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpGet] 
+    public async Task<IActionResult> GetProducts(
+        [FromQuery] int pageNumber = 1, 
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? searchTerm = null,
+        [FromQuery] string? category = null,
+        [FromQuery] decimal? minPrice = null,
+        [FromQuery] decimal? maxPrice = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] bool sortDescending = false,
+        CancellationToken ct = default)
+    {
+        var query = new GetProductsQuery(
+            pageNumber, pageSize, searchTerm, category, minPrice, maxPrice, sortBy, sortDescending);
+            
+        var result = await _sender.Send(query, ct);
+        
+        return Ok(result);
     }
 }

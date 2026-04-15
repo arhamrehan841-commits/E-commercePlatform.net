@@ -12,12 +12,16 @@ builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-// 2. Database Registration
+// 2. Adding Swagger for API documentation and testing
+builder.Services.AddEndpointsApiExplorer(); 
+builder.Services.AddSwaggerGen();
+
+// 3. Database Registration
 var connectionString = builder.Configuration.GetConnectionString("Database");
 builder.Services.AddDbContext<CatalogDbContext>(opt => opt.UseSqlServer(connectionString));
 builder.Services.AddDbContext<OrdersDbContext>(opt => opt.UseSqlServer(connectionString));
 
-// 3. MediatR Orchestration
+// 4. MediatR Orchestration
 builder.Services.AddMediatR(config => 
 {
     config.RegisterServicesFromAssembly(typeof(CreateProductCommand).Assembly);
@@ -25,9 +29,12 @@ builder.Services.AddMediatR(config =>
 
 var app = builder.Build();
 
-// 4. Pipeline Configuration
+// 5. Pipeline Configuration
 if (app.Environment.IsDevelopment())
 {
+    app.UseSwagger();   
+    app.UseSwaggerUI();
+
     await app.ApplyMigrationsAsync(); // <--- This triggers the Day 10 magic
 }
 

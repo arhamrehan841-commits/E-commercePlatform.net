@@ -2,7 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Infrastructure.Data;
 
-namespace Modules.Catalog.Application.Products.GetById;
+namespace Modules.Catalog.Application.Products.Get.GetById;
 
 internal sealed class GetProductByIdQueryHandler : IRequestHandler<GetProductByIdQuery, ProductResponse?>
 {
