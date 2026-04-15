@@ -1765,6 +1765,190 @@ git commit -m "fix(host): await async database migrations and seeding on startup
 
 ---
 
+## **Day 12 — The "Reading Room" & DDD Refactoring**
+
+**Objective:** Build a dedicated read pipeline with pagination and search support, restructure the Application layer into a clean `Get` namespace, and shift validation responsibility down into the `Money` Value Object to enforce pure DDD principles.
+
+---
+
+## **Commit 1: Read Pipeline Architecture & Bulk Fetching**
+
+**Files changed:**
+- `src/Modules/Catalog/Application/Products/Get/PagedResult.cs` — Created
+- `src/Modules/Catalog/Application/Products/Get/GetProducts/GetProductsQuery.cs` — Created
+- `src/Modules/Catalog/Application/Products/Get/GetProducts/GetProductsQueryHandler.cs` — Created
+- `src/Modules/Catalog/Application/Products/Get/GetById/GetProductByIdQuery.cs` — Moved
+- `src/Modules/Catalog/Application/Products/Get/GetById/GetProductByIdQueryHandler.cs` — Moved
+
+Restructured the Application layer to group all Read operations into a dedicated `Get` namespace. Created a generic `PagedResult<T>` DTO for bulk payloads. Built a unified `GetProductsQuery` pipeline utilizing `.AsNoTracking()` to handle filterable, paginated data fetching when a specific ID is not provided.
+
+### **Step 1: `PagedResult.cs`**
+
+**File: `src/Modules/Catalog/Application/Products/Get/PagedResult.cs`**
+
+```csharp
+namespace Modules.Catalog.Application.Products.Get;
+
+public record PagedResult<T>(
+    IEnumerable<T> Items,
+    int TotalCount,
+    int PageNumber,
+    int PageSize);
+```
+
+### **Step 2: `GetProductsQuery.cs`**
+
+**File: `src/Modules/Catalog/Application/Products/Get/GetProducts/GetProductsQuery.cs`**
+
+```csharp
+using MediatR;
+using Modules.Catalog.Application.Products.Get;
+
+namespace Modules.Catalog.Application.Products.Get.GetProducts;
+
+public record GetProductsQuery(
+    int PageNumber = 1,
+    int PageSize = 20,
+    string? SearchTerm = null
+) : IRequest<PagedResult<ProductResponse>>;
+```
+
+### **Step 3: `GetProductsQueryHandler.cs`**
+
+**File: `src/Modules/Catalog/Application/Products/Get/GetProducts/GetProductsQueryHandler.cs`**
+
+```csharp
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Modules.Catalog.Infrastructure.Data;
+using Modules.Catalog.Application.Products.Get;
+
+namespace Modules.Catalog.Application.Products.Get.GetProducts;
+
+internal sealed class GetProductsQueryHandler : IRequestHandler<GetProductsQuery, PagedResult<ProductResponse>>
+{
+    private readonly CatalogDbContext _dbContext;
+
+    public GetProductsQueryHandler(CatalogDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<PagedResult<ProductResponse>> Handle(GetProductsQuery request, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.Products.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(request.SearchTerm))
+        {
+            query = query.Where(p => p.Name.Contains(request.SearchTerm));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var products = await query
+            .OrderBy(p => p.Id)
+            .Skip((request.PageNumber - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .Select(p => new ProductResponse(
+                p.Id, p.Name, p.Description, p.Price.Amount, p.Price.Currency))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<ProductResponse>(products, totalCount, request.PageNumber, request.PageSize);
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "refactor(Get): shifted GetproductByIdQuery.cs & GetproductByIdQueryHandler.cs inside Catalog\Application\Products\Get\GetById && feat(Get): created and configured PagedResult.cs as a DTO && feaT(get): configured GetProductsQuery.cs and GetProductsQueryHandler.cs inside Get\GetProducts for fetching products when an id is not specified"
+```
+
+---
+
+## **Commit 2: Value Object Validation (Enforcing Pure DDD)**
+
+**Files changed:**
+- `src/SharedKernel/ValueObjects/Money.cs`
+- `src/Modules/Catalog/Domain/Products/Product.cs`
+
+Shifted currency and price validation logic out of the `Product` aggregate root and down into the `Money` Value Object. `Product` now strictly manages its own state and delegates price integrity to `Money`, adhering to pure DDD principles.
+
+### **Step 1: `Money.cs`**
+
+**File: `src/SharedKernel/ValueObjects/Money.cs`**
+
+```csharp
+namespace SharedKernel.ValueObjects;
+
+public record Money
+{
+    public decimal Amount { get; }
+    public string Currency { get; }
+
+    public Money(decimal amount, string currency)
+    {
+        if (amount <= 0)
+            throw new ArgumentException("Price must be greater than zero.");
+
+        if (string.IsNullOrWhiteSpace(currency) || currency.Length != 3)
+            throw new ArgumentException("Currency must be exactly 3 characters.");
+
+        Amount = amount;
+        Currency = currency.ToUpper();
+    }
+
+    public static Money Zero(string currency = "USD") => new(0, currency);
+}
+```
+
+### **Step 2: `Product.cs`**
+
+**File: `src/Modules/Catalog/Domain/Products/Product.cs`**
+
+```csharp
+using SharedKernel.ValueObjects;
+
+namespace Modules.Catalog.Domain.Products;
+
+public class Product
+{
+    public Guid Id { get; private set; }
+    public string Name { get; private set; } = string.Empty;
+    public string Description { get; private set; } = string.Empty;
+    public Money Price { get; private set; } = Money.Zero();
+
+    private Product() { }
+
+    public static Product Create(string name, string description, Money price)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Product name cannot be empty");
+
+        if (string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException("Product description cannot be empty");
+
+        return new Product
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            Description = description,
+            Price = price
+        };
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "refactor(Money): Money now handles logic for invalid currency and price and product only handles it's concerned data, this approach enforces DDD"
+```
+
+---
+
 > Run `dotnet build` from the root directory. The full vertical slice for the Catalog module is now complete:
 > **API Controller** → **MediatR** → **Domain (business rules)** → **EF Core (isolated schema)**
 > If anything fails, the Global Exception Handler safely catches it and returns a clean `400 Bad Request`.
