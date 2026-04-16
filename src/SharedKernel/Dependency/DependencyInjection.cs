@@ -5,7 +5,7 @@ namespace SharedKernel.Dependency;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddSharedKernel(this IServiceCollection services)
+    public static IServiceCollection AddGlobalExceptionHandler(this IServiceCollection services)
     {
         services.AddExceptionHandler<GlobalExceptionHandler>();
         services.AddProblemDetails();

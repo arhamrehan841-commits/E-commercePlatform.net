@@ -1,5 +1,5 @@
 using Host.Extensions;
-using SharedKernel.Exceptions;
+using SharedKernel.Dependency;
 using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Application.Products.Create;
 using Modules.Catalog.Infrastructure.Data;
@@ -9,8 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // 1. Core Services
 builder.Services.AddControllers();
-builder.Services.AddProblemDetails();
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddGlobalExceptionHandler();
 
 // 2. Adding Swagger for API documentation and testing
 builder.Services.AddEndpointsApiExplorer(); 
