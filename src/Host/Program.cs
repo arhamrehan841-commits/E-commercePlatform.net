@@ -3,8 +3,6 @@ using BuildingBlocks.Dependency;
 // Add these two new namespaces for your module entry points:
 using Modules.Catalog.Infrastructure; 
 using Modules.Orders.Infrastructure;
-// Keep MediatR assembly reference
-using Modules.Catalog.Application.Products.Create; 
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,12 +19,6 @@ var connectionString = builder.Configuration.GetConnectionString("Database")
     ?? throw new InvalidOperationException("CRITICAL: Database connection string is missing in appsettings.Development.json!");
 builder.Services.AddCatalogModule(connectionString);
 builder.Services.AddOrdersModule(connectionString);
-
-// 4. MediatR Orchestration
-builder.Services.AddMediatR(config => 
-{
-    config.RegisterServicesFromAssembly(typeof(CreateProductCommand).Assembly);
-});
 
 var app = builder.Build();
 

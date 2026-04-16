@@ -24,7 +24,7 @@ public record Money
         Currency = currency.ToUpper();
     }
 
-    public static Money Zero(string currency = "USD") => new(0, currency);
+    public static Money Zero(string currency = "USD") => new(1, currency);
 
     public Money Add(Money other)
     {
