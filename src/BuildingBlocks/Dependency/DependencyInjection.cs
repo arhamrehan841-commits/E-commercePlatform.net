@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using SharedKernel.Exceptions;
+using BuildingBlocks.Exceptions;
 
-namespace SharedKernel.Dependency;
+namespace BuildingBlocks.Dependency;
 
 public static class DependencyInjection
 {

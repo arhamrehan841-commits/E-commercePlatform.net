@@ -1,5 +1,5 @@
 using Host.Extensions;
-using SharedKernel.Dependency;
+using BuildingBlocks.Dependency;
 using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Application.Products.Create;
 using Modules.Catalog.Infrastructure.Data;

@@ -10,6 +10,7 @@
     <ProjectReference Include="..\Modules\Orders\Modules.Orders.csproj" />
     <ProjectReference Include="..\Modules\Basket\Modules.Basket.csproj" />
     <ProjectReference Include="..\Modules\Identity\Modules.Identity.csproj" />
+    <ProjectReference Include="..\BuildingBlocks\BuildingBlocks.csproj" />
   </ItemGroup>
 
   <ItemGroup>

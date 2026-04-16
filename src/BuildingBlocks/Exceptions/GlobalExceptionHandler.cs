@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Http;        // Required for HttpContext and StatusCo
 using Microsoft.AspNetCore.Mvc;         // Required for ProblemDetails
 using Microsoft.Extensions.Logging;
 
-namespace SharedKernel.Exceptions;
+namespace BuildingBlocks.Exceptions;
 
 // This class intercepts ANY unhandled exception thrown anywhere in the application
 public sealed class GlobalExceptionHandler : IExceptionHandler
