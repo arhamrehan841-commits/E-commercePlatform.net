@@ -1,9 +1,10 @@
-using Host.Extensions;
+using BuildingBlocks.Database;
 using BuildingBlocks.Dependency;
-using Microsoft.EntityFrameworkCore;
-using Modules.Catalog.Application.Products.Create;
-using Modules.Catalog.Infrastructure.Data;
-using Modules.Orders.Infrastructure.Data;
+// Add these two new namespaces for your module entry points:
+using Modules.Catalog.Infrastructure; 
+using Modules.Orders.Infrastructure;
+// Keep MediatR assembly reference
+using Modules.Catalog.Application.Products.Create; 
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,14 +12,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddGlobalExceptionHandler();
 
-// 2. Adding Swagger for API documentation and testing
+// 2. Adding Swagger
 builder.Services.AddEndpointsApiExplorer(); 
 builder.Services.AddSwaggerGen();
 
-// 3. Database Registration
-var connectionString = builder.Configuration.GetConnectionString("Database");
-builder.Services.AddDbContext<CatalogDbContext>(opt => opt.UseSqlServer(connectionString));
-builder.Services.AddDbContext<OrdersDbContext>(opt => opt.UseSqlServer(connectionString));
+// 3. Module Registration 
+var connectionString = builder.Configuration.GetConnectionString("Database") 
+    ?? throw new InvalidOperationException("CRITICAL: Database connection string is missing in appsettings.Development.json!");
+builder.Services.AddCatalogModule(connectionString);
+builder.Services.AddOrdersModule(connectionString);
 
 // 4. MediatR Orchestration
 builder.Services.AddMediatR(config => 
@@ -28,16 +30,28 @@ builder.Services.AddMediatR(config =>
 
 var app = builder.Build();
 
-// 5. MUST BE FIRST: Catch errors in everything below
+// 5. MUST BE FIRST: Catch errors
 app.UseExceptionHandler();
 
-// 6. Pipeline Configuration
+// 6. Pipeline Configuration (Dynamic Discovery)
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();   
     app.UseSwaggerUI();
 
-    await app.ApplyMigrationsAsync(); // <--- This triggers the Day 10 magic
+    // Find all modules that have a database and migrate/seed them dynamically
+    using var scope = app.Services.CreateScope();
+    var modules = scope.ServiceProvider.GetServices<IModuleDatabase>();
+
+    foreach (var module in modules)
+    {
+        await module.MigrateAsync();
+    }
+
+    foreach (var module in modules)
+    {
+        await module.SeedAsync();
+    }
 }
 
 app.UseHttpsRedirection();
