@@ -1,10 +1,12 @@
-using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Diagnostics; // Required for IExceptionHandler
+using Microsoft.AspNetCore.Http;        // Required for HttpContext and StatusCodes
+using Microsoft.AspNetCore.Mvc;         // Required for ProblemDetails
+using Microsoft.Extensions.Logging;
 
-namespace Host.Middleware;
+namespace SharedKernel.Exceptions;
 
 // This class intercepts ANY unhandled exception thrown anywhere in the application
-internal sealed class GlobalExceptionHandler : IExceptionHandler
+public sealed class GlobalExceptionHandler : IExceptionHandler
 {
     private readonly ILogger<GlobalExceptionHandler> _logger;
 

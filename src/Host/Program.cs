@@ -1,5 +1,5 @@
 using Host.Extensions;
-using Host.Middleware;
+using SharedKernel.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Application.Products.Create;
 using Modules.Catalog.Infrastructure.Data;
@@ -29,7 +29,10 @@ builder.Services.AddMediatR(config =>
 
 var app = builder.Build();
 
-// 5. Pipeline Configuration
+// 5. MUST BE FIRST: Catch errors in everything below
+app.UseExceptionHandler();
+
+// 6. Pipeline Configuration
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();   
@@ -38,7 +41,6 @@ if (app.Environment.IsDevelopment())
     await app.ApplyMigrationsAsync(); // <--- This triggers the Day 10 magic
 }
 
-app.UseExceptionHandler(); 
 app.UseHttpsRedirection();
 app.MapControllers();
 
