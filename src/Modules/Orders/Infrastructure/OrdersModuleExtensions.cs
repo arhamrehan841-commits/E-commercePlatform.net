@@ -9,12 +9,15 @@ public static class OrdersModuleExtensions
 {
     public static IServiceCollection AddOrdersModule(this IServiceCollection services, string connectionString)
     {
-        // 1. Register the DbContext
         services.AddDbContext<OrdersDbContext>(opt => opt.UseSqlServer(connectionString));
-        
-        // 2. Register the Module Database
         services.AddScoped<IModuleDatabase, OrdersModuleDatabase>();
         
+        // Tells MediatR to scan this specific module assembly
+        services.AddMediatR(config => 
+        {
+            config.RegisterServicesFromAssembly(typeof(OrdersModuleExtensions).Assembly);
+        });
+
         return services;
     }
 }
