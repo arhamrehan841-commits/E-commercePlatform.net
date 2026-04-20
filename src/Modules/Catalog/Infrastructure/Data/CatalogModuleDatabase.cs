@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using BuildingBlocks.Database; // The new interface we made
+using SharedKernel.Database; // The new interface we made
 
 namespace Modules.Catalog.Infrastructure.Data;
 

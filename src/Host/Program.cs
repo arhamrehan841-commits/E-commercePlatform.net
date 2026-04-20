@@ -1,4 +1,4 @@
-using BuildingBlocks.Database;
+using SharedKernel.Database;
 using BuildingBlocks.Dependency;
 // Add these two new namespaces for your module entry points:
 using Modules.Catalog.Infrastructure; 

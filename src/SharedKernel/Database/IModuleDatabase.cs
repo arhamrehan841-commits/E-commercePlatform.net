@@ -1,4 +1,4 @@
-namespace BuildingBlocks.Database;
+namespace SharedKernel.Database;
 
 public interface IModuleDatabase
 {
