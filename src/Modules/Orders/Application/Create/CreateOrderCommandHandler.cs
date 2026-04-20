@@ -20,6 +20,7 @@ internal sealed class CreateOrderCommandHandler(
         try
         {
             // 2. Save Order with ReservationId
+            // What if a user cancles the order before we confirm the reservation? We need to handle that case as well.
             var orderId = Guid.NewGuid();
             /* var order = new Order { Id = orderId, CustomerId = request.CustomerId, ReservationId = reservationId };
             context.Orders.Add(order);
