@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using BuildingBlocks.Database;
+using SharedKernel.Database;
 using Modules.Orders.Infrastructure.Data;
 
 namespace Modules.Orders.Infrastructure;

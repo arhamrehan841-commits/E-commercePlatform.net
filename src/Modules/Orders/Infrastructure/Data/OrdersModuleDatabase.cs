@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using BuildingBlocks.Database;
+using SharedKernel.Database;
 
 namespace Modules.Orders.Infrastructure.Data;
 
