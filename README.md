@@ -1946,6 +1946,120 @@ public class Product
 git add .
 git commit -m "refactor(Money): Money now handles logic for invalid currency and price and product only handles it's concerned data, this approach enforces DDD"
 ```
+---
+
+
+## **Day 13 — Zero-Touch Modular Expansion (Orders Module)**
+
+**Objective:** Expand the Orders module into a fully self-contained vertical slice — enabling it to handle Web API concerns, register its own internal dependencies, and expose its own controller — without modifying the Host's core responsibilities.
+
+---
+
+## **Commit 1: Infrastructure & Framework Alignment**
+
+The goal was to enable the Orders module to handle Web API concerns and register its own internal dependencies.
+
+### **Step 1: Framework Reference**
+
+**File: `src/Modules/Orders/Modules.Orders.csproj`**
+
+Added the ASP.NET Core framework reference to unlock Web API types inside the module:
+
+```xml
+<FrameworkReference Include="Microsoft.AspNetCore.App" />
+```
+
+### **Step 2: Module Extension**
+
+**File: `src/Modules/Orders/Infrastructure/OrdersModuleExtensions.cs`**
+
+```csharp
+public static IServiceCollection AddOrdersModule(this IServiceCollection services, string connectionString)
+{
+    services.AddDbContext<OrdersDbContext>(opt => opt.UseSqlServer(connectionString));
+    services.AddScoped<IModuleDatabase, OrdersModuleDatabase>();
+    services.AddMediatR(config =>
+        config.RegisterServicesFromAssembly(typeof(OrdersModuleExtensions).Assembly));
+    return services;
+}
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "feat(orders): add ASP.NET Core ref and MediatR registration"
+```
+
+---
+
+## **Commit 2: Application & Presentation Encapsulation**
+
+The goal was to move the Orders logic and its entry point into the module, removing the Host's responsibility for these files.
+
+### **Step 3: Create Order Command**
+
+**File: `src/Modules/Orders/Application/Create/CreateOrderCommand.cs`**
+
+```csharp
+using MediatR;
+
+namespace Modules.Orders.Application.Create;
+
+public record CreateOrderCommand(Guid CustomerId) : IRequest<Guid>;
+```
+
+### **Step 4: Create Order Command Handler**
+
+**File: `src/Modules/Orders/Application/Create/CreateOrderCommandHandler.cs`**
+
+```csharp
+using MediatR;
+
+namespace Modules.Orders.Application.Create;
+
+internal sealed class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Guid>
+{
+    public Task<Guid> Handle(CreateOrderCommand request, CancellationToken ct) =>
+        Task.FromResult(Guid.NewGuid());
+}
+```
+
+### **Step 5: Orders Controller**
+
+**File: `src/Modules/Orders/Presentation/OrdersController.cs`**
+
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Modules.Orders.Application.Create;
+
+namespace Modules.Orders.Presentation;
+
+[ApiController]
+[Route("api/[controller]")]
+public class OrdersController(ISender sender) : ControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> CreateOrder([FromBody] CreateOrderCommand command)
+    {
+        var orderId = await sender.Send(command);
+        return Created($"/api/orders/{orderId}", new { Id = orderId });
+    }
+}
+```
+
+**Execution:**
+
+```powershell
+git add .
+git commit -m "feat(orders): implement initial command and API controller
+
+- Created CreateOrderCommand and dedicated handler in separate files.
+- Implemented OrdersController with POST endpoint to trigger MediatR.
+- Established Presentation-to-Application flow within module boundary."
+```
+
 
 ---
 
@@ -1953,6 +2067,7 @@ git commit -m "refactor(Money): Money now handles logic for invalid currency and
 > **API Controller** → **MediatR** → **Domain (business rules)** → **EF Core (isolated schema)**
 > If anything fails, the Global Exception Handler safely catches it and returns a clean `400 Bad Request`.
 
+---
 
 ## **Getting Started**
 
