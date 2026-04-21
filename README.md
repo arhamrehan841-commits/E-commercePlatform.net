@@ -2059,8 +2059,97 @@ git commit -m "feat(orders): implement initial command and API controller
 - Implemented OrdersController with POST endpoint to trigger MediatR.
 - Established Presentation-to-Application flow within module boundary."
 ```
+---
+## **Day 14 — Shared Infrastructure, Messaging Contracts & Cross-Module Orchestration**
 
+**Objective:** Establish foundational contracts and cross-module shared logic, fulfill the reservation contract within the Catalog module, and connect the Orders module to the synchronous stock reservation flow.
 
+---
+
+## **Phase 1: Shared Infrastructure & Messaging Contracts**
+
+**Goal:** Establish the foundational contracts and cross-module shared logic while reorganizing the core architecture.
+
+### **Step 1: Integration Event Contracts**
+
+Introduced base integration event contracts into `BuildingBlocks` to facilitate decoupled asynchronous messaging.
+
+```powershell
+git commit -m "feat(building-blocks): introduce integration event contracts"
+```
+
+### **Step 2: Architectural Refactor — Database Directory**
+
+Shifted the `Database` directory from `BuildingBlocks` to `SharedKernel` to better reflect ownership and improve cohesion.
+
+```powershell
+git commit -m "refactor(Database): shifted Database directory from BuildingBlocks to SharedKernel"
+```
+
+### **Step 3: Stock Reservation Contract**
+
+Defined `IStockReservationContract` within `SharedKernel` to establish the rules for synchronous, cross-module stock reservations.
+
+```powershell
+git commit -m "feat(sharedkernel): Introduced IStockReservationContract to facilitate decoupled, synchronous stock reservations."
+```
+
+---
+
+## **Phase 2: Catalog Module Reservation Logic & Namespace Fixes**
+
+**Goal:** Fulfill the reservation contract within the Catalog module and clean up minor infrastructure routing issues.
+
+### **Step 4: Namespace Fix — Orders Infrastructure**
+
+Resolved a namespace discrepancy within the Orders module's infrastructure (`OrdersModuleDatabase.cs` and `OrdersModuleExtensions.cs`).
+
+```powershell
+git commit -m "fix(orders/infrastructure/data)): fixed the namespaces of OrdersModuleDatabase.cs and OrdersModuleExtensions.cs"
+```
+
+### **Step 5: Reservation Pattern & Event Handlers**
+
+Implemented the core reservation pattern (Available/Reserved states) and configured event handlers inside the Catalog module.
+
+```powershell
+git commit -m "feat(catalog): implement reservation pattern and event handlers"
+```
+
+### **Step 6: DI Container Wiring**
+
+Wired up the DI container in `CatalogModuleExtension.cs` by mapping the new `IStockReservationContract` to the `CatalogReservationService`.
+
+```powershell
+git commit -m "refactor(CatalogModuleExtension.cs): added dependency registration..."
+```
+
+---
+
+## **Phase 3: Orders Orchestration & Day 15 Prep**
+
+**Goal:** Connect the Orders module to the synchronous reservation flow and set up the next steps.
+
+### **Step 7: Orders Orchestration Pipeline**
+
+Updated the order creation pipeline in the Orders module to orchestrate the distributed transaction in sequence:
+
+1. Reserve Stock
+2. Create Order
+3. Confirm
+4. Publish Event
+
+```powershell
+git commit -m "feat(orders): orchestrate order creation with stock reservation"
+```
+
+### **Step 8: Day 15 To-Dos**
+
+Documented pending architecture tasks and To-Dos directly in code comments to ensure a smooth transition into Day 15.
+
+```powershell
+git commit -m "adding a comment to ensure the 'To dos' for day 15"
+```
 ---
 
 > Run `dotnet build` from the root directory. The full vertical slice for the Catalog module is now complete:
