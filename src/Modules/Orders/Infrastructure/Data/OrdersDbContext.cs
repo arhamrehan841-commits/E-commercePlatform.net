@@ -20,6 +20,7 @@ public class OrdersDbContext : DbContext
         {
             builder.HasKey(o => o.Id);
             builder.Property(o => o.CustomerId).IsRequired();
+            builder.Property(o => o.ReservationId).IsRequired();
             builder.Property(o => o.Status).IsRequired().HasMaxLength(50);
 
             // Strictly map the internal collection
