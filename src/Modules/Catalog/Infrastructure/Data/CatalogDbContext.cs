@@ -1,11 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Domain.Products;
+using Modules.Catalog.Domain.Reservation; // Add this
+using Modules.Catalog.Domain.StockItems;  // Add this
 
 namespace Modules.Catalog.Infrastructure.Data;
 
 public class CatalogDbContext : DbContext
 {
     public DbSet<Product> Products { get; set; }
+    public DbSet<StockItem> StockItems { get; set; }   // Added
+    public DbSet<Reservation> Reservations { get; set; } // Added
 
     public CatalogDbContext(DbContextOptions<CatalogDbContext> options) : base(options) { }
 
@@ -34,6 +38,30 @@ public class CatalogDbContext : DbContext
                     .HasMaxLength(3)
                     .IsRequired();
             });
+        });
+
+        // 3. Map the StockItem Entity
+        modelBuilder.Entity<StockItem>(builder =>
+        {
+            builder.HasKey(s => s.Id);
+            
+            // We can treat the StockItem Id as the Product Id (1-to-1 relationship)
+            builder.Property(s => s.AvailableQty).IsRequired();
+            builder.Property(s => s.ReservedQty).IsRequired();
+        });
+
+        // 4. Map the Reservation Entity
+        modelBuilder.Entity<Reservation>(builder =>
+        {
+            builder.HasKey(r => r.Id);
+            builder.Property(r => r.ItemId).IsRequired();
+            builder.Property(r => r.Quantity).IsRequired();
+            
+            // Store the Enum as a string in the database for readability
+            builder.Property(r => r.Status)
+                   .HasConversion<string>()
+                   .HasMaxLength(50)
+                   .IsRequired();
         });
     }
 }
