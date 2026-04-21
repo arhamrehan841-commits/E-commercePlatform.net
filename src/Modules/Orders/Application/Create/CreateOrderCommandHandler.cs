@@ -1,5 +1,6 @@
 using MediatR;
 using SharedKernel.Contracts;
+using SharedKernel.Exceptions;
 using BuildingBlocks.Messaging.Events;
 using Modules.Orders.Domain;
 using Modules.Orders.Infrastructure.Data;
@@ -15,51 +16,54 @@ internal sealed class CreateOrderCommandHandler(
 {
     public async Task<Guid> Handle(CreateOrderCommand request, CancellationToken ct)
     {
-        // 1. Reserve Stock
-        var reservationId = await catalogService.ReserveStockAsync(request.ItemId, request.Quantity, ct);
-        
+        // 1. Try to reserve everything
+        var result = await catalogService.ReserveStockStrictAsync(
+            request.Items.Select(i => new BulkReservationRequest(i.ProductId, i.Quantity)), ct);
+
+        // 2. If ANY item failed, release the successful ones and tell the user
+        if (!result.AllReserved)
+        {
+            if (result.ReservationIds.Any())
+            {
+                await catalogService.ReleaseReservationsAsync(result.ReservationIds, CancellationToken.None);
+            }
+
+            // We throw a custom exception that the API can turn into a 422 Unprocessable Entity
+            // This contains the list the frontend needs to show the "Please remove these" prompt
+            throw new StockValidationException(result.Rejections);
+        }
+
         Order? order = null;
         bool orderSavedToDb = false;
 
         try
         {
-            // 2. Create Order Entity
-            order = Order.Create(request.CustomerId, reservationId);
-            var mockPrice = new Money(99.99m, "USD"); 
-            order.AddItem(request.ItemId, "Mock Product Name", mockPrice, request.Quantity);
+            // 3. Create and Save (Standard flow since we know all stock is locked)
+            order = Order.Create(request.CustomerId, result.ReservationIds);
+            
+            foreach (var item in request.Items)
+            {
+                order.AddItem(item.ProductId, "Fetched Name", new Money(10, "USD"), item.Quantity);
+            }
 
-            // 3. Save to Database
             context.Orders.Add(order);
-            await context.SaveChangesAsync(ct); 
-            orderSavedToDb = true; // Mark that EF Core has committed this to the DB
+            await context.SaveChangesAsync(ct);
+            orderSavedToDb = true;
 
-            // 4. Confirm Reservation
-            // IF THE TAB CLOSES HERE, WE JUMP TO CATCH
-            await catalogService.ConfirmReservationAsync(reservationId, ct);
-
-            // 5. Publish Event
+            await catalogService.ConfirmReservationsAsync(result.ReservationIds, ct);
             await publisher.Publish(new OrderCreatedIntegrationEvent(order.Id, request.CustomerId), ct);
 
             return order.Id;
         }
         catch (Exception)
         {
-            // WARNING: The original 'ct' might be canceled! 
-            // We MUST use CancellationToken.None to ensure these cleanups actually run.
-
-            // Rollback 1: Release the stock in the Catalog
-            await catalogService.ReleaseReservationAsync(reservationId, CancellationToken.None);
-
-            // Rollback 2: Fail the Order if it was already saved to the DB
+            await catalogService.ReleaseReservationsAsync(result.ReservationIds, CancellationToken.None);
             if (orderSavedToDb && order != null)
             {
-                order.MarkAsFailed("System error or user disconnected before confirmation.");
-                
-                // We use context.Update or just SaveChanges since the entity is still tracked
-                await context.SaveChangesAsync(CancellationToken.None); 
+                order.MarkAsFailed("Technical failure during strict fulfillment.");
+                await context.SaveChangesAsync(CancellationToken.None);
             }
-
-            throw; // Rethrow to let the GlobalExceptionHandler return a 500/400 to the client
+            throw;
         }
     }
 }
