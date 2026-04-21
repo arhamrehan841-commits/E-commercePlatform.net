@@ -1,4 +1,5 @@
 using SharedKernel.Contracts;
+using SharedKernel.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Modules.Catalog.Domain.Reservation;
 using Modules.Catalog.Domain.StockItems;
@@ -8,56 +9,75 @@ namespace Modules.Catalog.Infrastructure.Contracts;
 
 internal sealed class CatalogReservationService(CatalogDbContext context) : IStockReservationContract
 {
-    public async Task<Guid> ReserveStockAsync(Guid itemId, int quantity, CancellationToken ct)
+    public async Task<BulkReservationResponse> ReserveStockStrictAsync(
+    IEnumerable<BulkReservationRequest> requests, CancellationToken ct)
     {
-        // Note: In production, you would use raw SQL for SELECT FOR UPDATE to lock the row
-        var stock = await context.Set<StockItem>().FirstOrDefaultAsync(x => x.Id == itemId, ct)
-            ?? throw new Exception($"Item {itemId} not found.");
+    var reservationIds = new List<Guid>();
+    var rejections = new List<StockRejection>();
 
-        if (stock.AvailableQty < quantity)
-            throw new Exception("OutOfStockException: Insufficient stock available.");
-
-        stock.AvailableQty -= quantity;
-        stock.ReservedQty += quantity;
-
-        var reservation = new Reservation
-        {
-            Id = Guid.NewGuid(),
-            ItemId = itemId,
-            Quantity = quantity,
-            Status = ReservationStatus.Pending
-        };
-
-        context.Set<Reservation>().Add(reservation);
-        await context.SaveChangesAsync(ct);
-
-        return reservation.Id;
-    }
-
-    public async Task ConfirmReservationAsync(Guid reservationId, CancellationToken ct)
+    foreach (var req in requests)
     {
-        var reservation = await context.Set<Reservation>().FindAsync([reservationId], ct);
-        if (reservation != null && reservation.Status == ReservationStatus.Pending)
+        var stock = await context.StockItems.FindAsync(new object[] { req.ItemId }, ct);
+        
+        if (stock == null || stock.AvailableQty < req.Quantity)
         {
-            reservation.Status = ReservationStatus.Confirmed;
-            await context.SaveChangesAsync(ct);
+            rejections.Add(new StockRejection(req.ItemId, "Product Name", req.Quantity, stock?.AvailableQty ?? 0));
         }
-    }
-
-    public async Task ReleaseReservationAsync(Guid reservationId, CancellationToken ct)
-    {
-        var reservation = await context.Set<Reservation>().FindAsync([reservationId], ct);
-        if (reservation != null && reservation.Status == ReservationStatus.Pending)
+        else
         {
-            reservation.Status = ReservationStatus.Released;
+            // Temporary reservation logic
+            stock.AvailableQty -= req.Quantity;
+            stock.ReservedQty += req.Quantity;
             
-            var stock = await context.Set<StockItem>().FindAsync([reservation.ItemId], ct);
-            if (stock != null)
-            {
-                stock.AvailableQty += reservation.Quantity;
-                stock.ReservedQty -= reservation.Quantity;
-            }
-            await context.SaveChangesAsync(ct);
+            var res = new Reservation { Id = Guid.NewGuid(), ItemId = req.ItemId, Quantity = req.Quantity };
+            context.Reservations.Add(res);
+            reservationIds.Add(res.Id);
         }
+    }
+
+    await context.SaveChangesAsync(ct);
+
+    return new BulkReservationResponse(
+        AllReserved: !rejections.Any(),
+        ReservationIds: reservationIds,
+        Rejections: rejections);
+    }
+
+    public async Task ConfirmReservationsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    {
+        foreach (var reservationId in ids)
+        {
+            var reservation = await context.Set<Reservation>().FindAsync(new object[] { reservationId }, ct);
+
+            if (reservation != null && reservation.Status == ReservationStatus.Pending)
+            {
+                reservation.Status = ReservationStatus.Confirmed;
+            }
+        }
+
+        await context.SaveChangesAsync(ct);
+    }
+
+    public async Task ReleaseReservationsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    {
+        foreach (var reservationId in ids)
+        {
+            var reservation = await context.Set<Reservation>().FindAsync(new object[] { reservationId }, ct);
+
+            if (reservation != null && reservation.Status == ReservationStatus.Pending)
+            {
+                reservation.Status = ReservationStatus.Released;
+
+                var stock = await context.Set<StockItem>().FindAsync(new object[] { reservation.ItemId }, ct);
+
+                if (stock != null)
+                {
+                    stock.AvailableQty += reservation.Quantity;
+                    stock.ReservedQty -= reservation.Quantity;
+                }
+            }
+        }
+
+        await context.SaveChangesAsync(ct);
     }
 }
