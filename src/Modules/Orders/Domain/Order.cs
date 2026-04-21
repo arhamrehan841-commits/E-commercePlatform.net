@@ -6,7 +6,7 @@ public class Order
 {
     public Guid Id { get; private set; }
     public Guid CustomerId { get; private set; }
-    public Guid ReservationId { get; private set; } // Added this
+    public List<Guid> ReservationIds { get; private set; } = new();
     public string Status { get; private set; } = "Pending";
 
     private String? LogMessage;
@@ -18,16 +18,18 @@ public class Order
     private Order() { }
 
 // Updated to require reservationId
-    public static Order Create(Guid customerId, Guid reservationId)
+    public static Order Create(Guid customerId, List<Guid> reservationIds)
     {
         if (customerId == Guid.Empty) throw new ArgumentException("Customer ID cannot be empty");
-        if (reservationId == Guid.Empty) throw new ArgumentException("Reservation ID cannot be empty");
+
+        foreach(var reservationId in reservationIds)
+            if (reservationId == Guid.Empty) throw new ArgumentException("Reservation ID cannot be empty");
 
         return new Order 
         { 
             Id = Guid.NewGuid(), 
             CustomerId = customerId,
-            ReservationId = reservationId
+            ReservationIds = reservationIds
         };
     }
 
