@@ -6,7 +6,10 @@ public class Order
 {
     public Guid Id { get; private set; }
     public Guid CustomerId { get; private set; }
+    public Guid ReservationId { get; private set; } // Added this
     public string Status { get; private set; } = "Pending";
+
+    private String? LogMessage;
     
     private readonly List<OrderItem> _items = new();
     public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
@@ -14,16 +17,17 @@ public class Order
     // Parameterless constructor required by Entity Framework Core
     private Order() { }
 
-    public static Order Create(Guid customerId)
+// Updated to require reservationId
+    public static Order Create(Guid customerId, Guid reservationId)
     {
-        // Guard Clause
-        if (customerId == Guid.Empty)
-            throw new ArgumentException("Customer ID cannot be empty");
+        if (customerId == Guid.Empty) throw new ArgumentException("Customer ID cannot be empty");
+        if (reservationId == Guid.Empty) throw new ArgumentException("Reservation ID cannot be empty");
 
         return new Order 
         { 
             Id = Guid.NewGuid(), 
-            CustomerId = customerId 
+            CustomerId = customerId,
+            ReservationId = reservationId
         };
     }
 
@@ -42,4 +46,10 @@ public class Order
         
         return new Money(totalAmount, currency);
     }
+
+    public void MarkAsFailed(string reason)
+{
+    Status = "Failed";
+    LogMessage = $"Order {Id} marked as Failed. Reason: {reason}";
+}
 }
