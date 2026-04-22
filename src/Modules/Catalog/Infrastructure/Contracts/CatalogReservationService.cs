@@ -10,37 +10,39 @@ namespace Modules.Catalog.Infrastructure.Contracts;
 internal sealed class CatalogReservationService(CatalogDbContext context) : IStockReservationContract
 {
     public async Task<BulkReservationResponse> ReserveStockStrictAsync(
-    IEnumerable<BulkReservationRequest> requests, CancellationToken ct)
+        IEnumerable<BulkReservationRequest> requests, CancellationToken ct)
     {
-    var reservationIds = new List<Guid>();
-    var rejections = new List<StockRejection>();
+        var reservations = new List<ReservationResult>(); // <-- UPDATED
+        var rejections = new List<StockRejection>();
 
-    foreach (var req in requests)
-    {
-        var stock = await context.StockItems.FindAsync(new object[] { req.ItemId }, ct);
-        
-        if (stock == null || stock.AvailableQty < req.Quantity)
+        foreach (var req in requests)
         {
-            rejections.Add(new StockRejection(req.ItemId, "Product Name", req.Quantity, stock?.AvailableQty ?? 0));
-        }
-        else
-        {
-            // Temporary reservation logic
-            stock.AvailableQty -= req.Quantity;
-            stock.ReservedQty += req.Quantity;
+            var stock = await context.StockItems.FindAsync(new object[] { req.ItemId }, ct);
             
-            var res = new Reservation { Id = Guid.NewGuid(), ItemId = req.ItemId, Quantity = req.Quantity };
-            context.Reservations.Add(res);
-            reservationIds.Add(res.Id);
+            if (stock == null || stock.AvailableQty < req.Quantity)
+            {
+                rejections.Add(new StockRejection(req.ItemId, "Product Name", req.Quantity, stock?.AvailableQty ?? 0));
+            }
+            else
+            {
+                stock.AvailableQty -= req.Quantity;
+                stock.ReservedQty += req.Quantity;
+                
+                // Explicitly set Status
+                var res = new Reservation { Id = Guid.NewGuid(), ItemId = req.ItemId, Quantity = req.Quantity, Status = ReservationStatus.Pending };
+                context.Reservations.Add(res);
+                
+                // Pair the Item with the Reservation
+                reservations.Add(new ReservationResult(req.ItemId, res.Id)); // <-- UPDATED
+            }
         }
-    }
 
-    await context.SaveChangesAsync(ct);
+        await context.SaveChangesAsync(ct);
 
-    return new BulkReservationResponse(
-        AllReserved: !rejections.Any(),
-        ReservationIds: reservationIds,
-        Rejections: rejections);
+        return new BulkReservationResponse(
+            AllReserved: !rejections.Any(),
+            Reservations: reservations, // <-- UPDATED
+            Rejections: rejections);
     }
 
     public async Task ConfirmReservationsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
