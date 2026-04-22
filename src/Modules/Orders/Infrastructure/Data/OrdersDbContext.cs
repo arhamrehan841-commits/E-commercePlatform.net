@@ -12,31 +12,30 @@ public class OrdersDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // 1. Enforce Schema Segregation
         modelBuilder.HasDefaultSchema("orders");
 
-        // 2. Map the Order Entity
         modelBuilder.Entity<Order>(builder =>
         {
             builder.HasKey(o => o.Id);
             builder.Property(o => o.CustomerId).IsRequired();
-            builder.Property(o => o.ReservationId).IsRequired();
             builder.Property(o => o.Status).IsRequired().HasMaxLength(50);
+            // REMOVED: builder.Property(o => o.ReservationId).IsRequired(); <--- THE FIX
 
-            // Strictly map the internal collection
             builder.HasMany(o => o.Items)
                    .WithOne()
                    .HasForeignKey(i => i.OrderId)
-                   .OnDelete(DeleteBehavior.Cascade); // If order is deleted, delete items
+                   .OnDelete(DeleteBehavior.Cascade); 
         });
 
-        // 3. Map the OrderItem Entity
         modelBuilder.Entity<OrderItem>(builder =>
         {
             builder.HasKey(i => i.Id);
             builder.Property(i => i.ProductId).IsRequired();
+            builder.Property(i => i.ReservationId).IsRequired(); // <-- ADDED TO THE ITEM
             builder.Property(i => i.ProductName).IsRequired().HasMaxLength(200);
             builder.Property(i => i.Quantity).IsRequired();
+            
+            // ... Money mapping remains the same
 
             // Map the Money Value Object for the item price
             builder.OwnsOne(i => i.UnitPrice, priceBuilder =>
