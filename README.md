@@ -2151,7 +2151,172 @@ Documented pending architecture tasks and To-Dos directly in code comments to en
 git commit -m "adding a comment to ensure the 'To dos' for day 15"
 ```
 ---
+## **Day 15 — Distributed Transactions, Bulk Reservations & Compensating Logic**
 
+**Objective:** Harden the order creation pipeline with multi-item bulk stock reservations, strict validation, compensating rollback transactions for partial failures, and item-level reservation tracking across the Orders and Catalog modules.
+
+---
+
+## **Commit 1: Order Aggregate Root Hardening**
+
+**File: `src/Modules/Orders/Domain/Order.cs`**
+
+Updated the Order Aggregate Root. Added a `List<Guid> ReservationIds` to tie the order to specific inventory locks, added a `LogMessage` string for internal auditing, and built the `MarkAsFailed(reason)` method to enable soft-failures instead of hard-deleting records.
+
+```powershell
+git commit -m "refactor(Order.cs): added ReservationId and LogMessage fields, MarkAsFailed method to Order.cs"
+```
+
+---
+
+## **Commit 2: EF Core Schema Alignment**
+
+**File: `src/Modules/Orders/Infrastructure/Data/OrdersDbContext.cs`**
+
+Updated the EF Core configuration to match the domain changes. Explicitly mapped the `ReservationId` property so SQL Server enforces it as a required column when writing to the `orders.Orders` table.
+
+```powershell
+git commit -m "refactor(OrdersDbContext.cs): added ReservationId to OrdersDbcontext.cs as a required field"
+```
+
+---
+
+## **Commit 3: Compensating Transaction for Partial Failures**
+
+**File: `src/Modules/Orders/Application/Create/CreateOrderCommandHandler.cs`**
+
+Built the rollback safety net. Added the `catch` block that triggers `ReleaseReservationsAsync` using `CancellationToken.None` if the database fails to save, ensuring the system doesn't leave permanent "zombie" inventory locks.
+
+```powershell
+git commit -m "fix(orders): add compensating transaction for partial failures"
+```
+
+---
+
+## **Commit 4: Bulk Stock Reservation Engine**
+
+**Files:**
+- `src/Modules/Catalog/Infrastructure/Contracts/CatalogReservationService.cs`
+- `src/SharedKernel/Contracts/IStockReservationContract.cs`
+
+Re-engineered the Catalog's reservation engine. Updated `ReserveStockStrictAsync` to accept a list of items, iterate through them to check `AvailableQty`, apply temporary locks, and return a comprehensive `BulkReservationResponse`.
+
+```powershell
+git commit -m "Refactor stock reservation to support bulk operations"
+```
+
+---
+
+## **Commit 5: StockItem & Reservation DB Mapping**
+
+**File: `src/Modules/Catalog/Infrastructure/Data/CatalogDbContext.cs`**
+
+Bridged the gap between the Catalog domain and the physical database. Added the `DbSet` properties for `StockItems` and `Reservations` and configured their column constraints so EF Core knows how to build the tables.
+
+```powershell
+git commit -m "Add StockItem and Reservation mapping in CatalogDbContext"
+```
+
+---
+
+## **Commit 6: Strict Multi-Item Order Orchestration & Rollback**
+
+**File: `src/Modules/Orders/Application/Create/CreateOrderCommandHandler.cs`**
+
+Rewrote the primary orchestration loop. The handler now evaluates the `AllReserved` flag — if even one item is missing, it actively halts the order, rolls back any successful partial locks, and throws a validation exception.
+
+```powershell
+git commit -m "Implement strict multi-item order creation with stock validation and rollback handling"
+```
+
+---
+
+## **Commit 7: Multi-Item Command Contract**
+
+**File: `src/Modules/Orders/Application/Create/CreateOrderCommand.cs`**
+
+Updated the MediatR request contract. Replaced the single `ItemId` parameter with a `List<OrderItemRequest>`, enabling the API to accept multi-item shopping carts in a single payload.
+
+```powershell
+git commit -m "feat(ordering): support bulk stock reservation in order creation flow"
+```
+
+---
+
+## **Commit 8: Stock Validation Exceptions**
+
+**Files:**
+- `src/SharedKernel/Exceptions/StockRejection.cs`
+- `src/SharedKernel/Exceptions/StockValidationException.cs`
+
+Created the strict validation mechanisms. Defined the `StockRejection` record to hold missing item details and the `StockValidationException` to carry that list up to the API layer so the frontend can read it.
+
+```powershell
+git commit -m "feat(Exceptions): added StockRejection.cs and StockValidationException.cs for strict control of Order"
+```
+
+---
+
+## **Commit 9: Reservation Contract — Item-Reservation Pairs**
+
+**File: `src/SharedKernel/Contracts/IStockReservationContract.cs`**
+
+Replaced the flat list of GUIDs in `BulkReservationResponse` with a new `ReservationResult` record. This ensures the Catalog module can explicitly pair a `ProductId` with its newly generated `ReservationId`.
+
+```powershell
+git commit -m "feat(sharedkernel): update IStockReservationContract.cs to return item-reservation pairs"
+```
+
+---
+
+## **Commit 10: CatalogReservationService — Paired Results**
+
+**File: `src/Modules/Catalog/Infrastructure/Contracts/CatalogReservationService.cs`**
+
+Updated the `ReserveStockStrictAsync` method to fulfill the new contract. When stock is successfully locked, it now constructs and returns the paired `ReservationResult` objects.
+
+```powershell
+git commit -m "refactor(catalog): adapt CatalogReservationService.cs to return paired reservation results"
+```
+
+---
+
+## **Commit 11: Reservation Tracking Shifted to OrderItem**
+
+**Files:**
+- `src/Modules/Orders/Domain/Order.cs`
+- `src/Modules/Orders/Domain/OrderItem.cs`
+
+Stripped the `List<Guid> ReservationIds` property out of the `Order` aggregate root entirely. Added `ReservationId` as a core property to the `OrderItem` entity and updated its constructor and guard clauses to require it.
+
+```powershell
+git commit -m "refactor(order-domain): shift reservation tracking from order aggregate to order item"
+```
+
+---
+
+## **Commit 12: OrdersDbContext — Corrected Schema Mapping**
+
+**File: `src/Modules/Orders/Infrastructure/Data/OrdersDbContext.cs`**
+
+Deleted the broken scalar `builder.Property(o => o.ReservationId)` mapping from the `Order` configuration. Added the correct `ReservationId` mapping to the `OrderItem` configuration to physically enforce the relational schema.
+
+```powershell
+git commit -m "fix(OrdersDbContext.cs): map reservation id to order items and removed reservation id's invalid aggregate mapping to order"
+```
+
+---
+
+## **Commit 13: Item-Level Reservation Orchestration**
+
+**File: `src/Modules/Orders/Application/Create/CreateOrderCommandHandler.cs`**
+
+Modified the checkout orchestration. It now iterates through the cart, finds the specific `ReservationId` matched to the current item's `ProductId` from the Catalog response, and passes it into the `Order.AddItem()` domain method.
+
+```powershell
+git commit -m "refactor(CreateOrderCommandHandler.cs): orchestrate item-level reservations in order creation pipeline"
+```
+---
 > Run `dotnet build` from the root directory. The full vertical slice for the Catalog module is now complete:
 > **API Controller** → **MediatR** → **Domain (business rules)** → **EF Core (isolated schema)**
 > If anything fails, the Global Exception Handler safely catches it and returns a clean `400 Bad Request`.
