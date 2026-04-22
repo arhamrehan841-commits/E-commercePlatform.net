@@ -1,13 +1,14 @@
 using SharedKernel.Exceptions;
 namespace SharedKernel.Contracts;
 
-// This allows Orders to command Catalog synchronously without a direct project reference
-// The response now helps the Handler decide whether to proceed or fail
 public record BulkReservationRequest(Guid ItemId, int Quantity);
+
+// NEW: Paired result to map products to reservations
+public record ReservationResult(Guid ItemId, Guid ReservationId);
 
 public record BulkReservationResponse(
     bool AllReserved, 
-    List<Guid> ReservationIds, 
+    List<ReservationResult> Reservations, // <-- UPDATED
     List<StockRejection> Rejections);
 
 public interface IStockReservationContract
