@@ -17,7 +17,7 @@ internal sealed class CatalogReservationService(CatalogDbContext context) : ISto
 
         foreach (var req in requests)
         {
-            var stock = await context.StockItems.FindAsync(new object[] { req.ItemId }, ct);
+            var stock = await context.StockItems.FindAsync(req.ItemId, ct);
             
             if (stock == null || stock.AvailableQty < req.Quantity)
             {
