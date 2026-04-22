@@ -20,16 +20,15 @@ internal sealed class CreateOrderCommandHandler(
         var result = await catalogService.ReserveStockStrictAsync(
             request.Items.Select(i => new BulkReservationRequest(i.ProductId, i.Quantity)), ct);
 
-        // 2. If ANY item failed, release the successful ones and tell the user
+        // Extract a flat list of IDs for the Confirm/Release methods
+        var allReservationIds = result.Reservations.Select(r => r.ReservationId).ToList(); // <-- ADDED
+
         if (!result.AllReserved)
         {
-            if (result.ReservationIds.Any())
+            if (allReservationIds.Any())
             {
-                await catalogService.ReleaseReservationsAsync(result.ReservationIds, CancellationToken.None);
+                await catalogService.ReleaseReservationsAsync(allReservationIds, CancellationToken.None);
             }
-
-            // We throw a custom exception that the API can turn into a 422 Unprocessable Entity
-            // This contains the list the frontend needs to show the "Please remove these" prompt
             throw new StockValidationException(result.Rejections);
         }
 
@@ -38,26 +37,28 @@ internal sealed class CreateOrderCommandHandler(
 
         try
         {
-            // 3. Create and Save (Standard flow since we know all stock is locked)
-            order = Order.Create(request.CustomerId, result.ReservationIds);
+            order = Order.Create(request.CustomerId); // <-- UPDATED
             
             foreach (var item in request.Items)
             {
-                order.AddItem(item.ProductId, "Fetched Name", new Money(10, "USD"), item.Quantity);
+                // Find the reservation that matches this product
+                var reservationId = result.Reservations.First(r => r.ItemId == item.ProductId).ReservationId; // <-- ADDED
+                
+                order.AddItem(item.ProductId, reservationId, "Fetched Name", new Money(10, "USD"), item.Quantity); // <-- UPDATED
             }
 
             context.Orders.Add(order);
             await context.SaveChangesAsync(ct);
             orderSavedToDb = true;
 
-            await catalogService.ConfirmReservationsAsync(result.ReservationIds, ct);
+            await catalogService.ConfirmReservationsAsync(allReservationIds, ct); // <-- UPDATED
             await publisher.Publish(new OrderCreatedIntegrationEvent(order.Id, request.CustomerId), ct);
 
             return order.Id;
         }
         catch (Exception)
         {
-            await catalogService.ReleaseReservationsAsync(result.ReservationIds, CancellationToken.None);
+            await catalogService.ReleaseReservationsAsync(allReservationIds, CancellationToken.None); // <-- UPDATED
             if (orderSavedToDb && order != null)
             {
                 order.MarkAsFailed("Technical failure during strict fulfillment.");
