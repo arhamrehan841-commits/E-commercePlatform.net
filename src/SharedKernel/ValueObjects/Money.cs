@@ -10,7 +10,7 @@ public record Money
 
     public Money(decimal amount, string currency)
     {
-        if (amount <= 0)
+        if (amount < 0)
             throw new ArgumentException("Amount cannot be negative");
 
         if (string.IsNullOrWhiteSpace(currency) ||
@@ -24,7 +24,7 @@ public record Money
         Currency = currency.ToUpper();
     }
 
-    public static Money Zero(string currency = "USD") => new(1, currency);
+    public static Money Zero(string currency = "USD") => new(0, currency);
 
     public Money Add(Money other)
     {
