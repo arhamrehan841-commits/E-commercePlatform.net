@@ -1,11 +1,11 @@
-using Microsoft.AspNetCore.Diagnostics; // Required for IExceptionHandler
-using Microsoft.AspNetCore.Http;        // Required for HttpContext and StatusCodes
-using Microsoft.AspNetCore.Mvc;         // Required for ProblemDetails
+using Microsoft.AspNetCore.Diagnostics; 
+using Microsoft.AspNetCore.Http;        
+using Microsoft.AspNetCore.Mvc;         
 using Microsoft.Extensions.Logging;
+using SharedKernel.Exceptions; // <-- We can use this safely now!
 
 namespace BuildingBlocks.Exceptions;
 
-// This class intercepts ANY unhandled exception thrown anywhere in the application
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {
     private readonly ILogger<GlobalExceptionHandler> _logger;
@@ -20,33 +20,38 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         Exception exception, 
         CancellationToken cancellationToken)
     {
-        // 1. Securely log the full error and stack trace for internal debugging
         _logger.LogError(exception, "An exception occurred: {Message}", exception.Message);
 
-        // 2. Map the Exception type to a specific HTTP Status Code
+        // 1. Clean, strongly-typed pattern matching
         var statusCode = exception switch
         {
-            // If the Domain throws a Guard Clause exception, it's a Bad Request (400)
             ArgumentException => StatusCodes.Status400BadRequest,
-            
-            // Otherwise, it's an unhandled Internal Server Error (500)
+            StockValidationException => StatusCodes.Status422UnprocessableEntity, 
             _ => StatusCodes.Status500InternalServerError
         };
 
-        // 3. Construct the RFC 7807 standard JSON response
         var problemDetails = new ProblemDetails
         {
             Status = statusCode,
-            Title = statusCode == 400 ? "Validation Error" : "Server Error",
-            Detail = statusCode == 400 ? exception.Message : "An unexpected error occurred.",
+            Title = statusCode switch 
+            {
+                400 => "Validation Error",
+                422 => "Order Unprocessable", 
+                _ => "Server Error"
+            },
+            Detail = statusCode == 500 ? "An unexpected error occurred." : exception.Message,
             Type = $"https://httpstatuses.com/{statusCode}"
         };
 
-        // 4. Return the secure response to the client
+        // 2. Safe, strongly-typed cast
+        if (exception is StockValidationException stockEx)
+        {
+            problemDetails.Extensions["rejections"] = stockEx.Rejections;
+        }
+
         httpContext.Response.StatusCode = statusCode;
         await httpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
 
-        // Return true to tell ASP.NET that we handled the exception and to stop processing
         return true; 
     }
 }
